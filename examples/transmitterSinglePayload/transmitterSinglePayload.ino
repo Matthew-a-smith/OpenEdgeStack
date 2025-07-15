@@ -1,12 +1,10 @@
 /*
   OpenEdgeStack SX126x Transmit with Groups Example
 
-  This example demonstrates how to transmit structured groups of data 
+  This example demonstrates how to transmit single packets of data 
   over raw LoRa using the SX126x module family.
 
-  Each group is stored on the device as an encrypted binary blob, referred to as a "group".
-  The example sets up group configuration parameters, generates sample data, 
-  and transmits it over LoRa using a secure and lightweight custom format.
+  Each packet gets encrypted and sent when the button is pushed
 
   Notes:
   - Data is encrypted using appSKey before transmission.
@@ -14,8 +12,6 @@
       [SenderID (8 bytes)] + [Encrypted Group Data] + [HMAC (8 bytes)]
 
   - Other SX126x family modules are supported.
-
-  Ideal for demonstrating secure, chunked transmissions with minimal LoRaWAN overhead.
 */
 
 #include <EndDevice.h>
@@ -118,6 +114,7 @@ void loop() {
 
   int currentButtonState = digitalRead(BUTTON_PIN);
   if (currentButtonState == HIGH && lastButtonState == LOW) {
+    Serial.println("<--------------------------------->");
     Serial.println("[BUTTON] Press detected. Sending...");
 
     String groupOne = "this is a test sentence up to and over 16 bytes in length";

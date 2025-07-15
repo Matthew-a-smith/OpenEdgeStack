@@ -28,26 +28,40 @@ void deriveSessionKey(uint8_t* outKey, uint8_t keyType, const uint8_t* appKey,
 void saveSessionToNVS(const String& devEUI, SessionInfo session) {
   uint8_t encrypted[sizeof(SessionInfo)];
   encryptSession(session, encrypted);
-  preferences.begin("lora", false);
+  
   String key = devEUI.substring(0, 8);  // Truncate to 8 characters
-  preferences.putBytes(key.c_str(), encrypted, 32);
+  Serial.println("[NVS] Saving session to NVS:");
+  Serial.println("       Full devEUI: " + devEUI);
+  Serial.println("       Truncated key: " + key);
+
+  preferences.begin("lora", false);
+  preferences.putBytes(key.c_str(), encrypted, sizeof(SessionInfo));
   preferences.end();
+
+  Serial.println("[NVS] Session saved under key: " + key);
 }
 
-
-
 bool loadSessionFromNVS(const String& devEUI, SessionInfo& session) {
-  uint8_t encrypted[32];
+  uint8_t encrypted[sizeof(SessionInfo)];
   String key = devEUI.substring(0, 8);  // Truncate to 8 characters
   
+  Serial.println("[NVS] Attempting to load session:");
+  Serial.println("       Full devEUI: " + devEUI);
+  Serial.println("       Truncated key: " + key);
+
   preferences.begin("lora", true);
-  if (preferences.getBytesLength(key.c_str()) != sizeof(SessionInfo)) {
+  size_t len = preferences.getBytesLength(key.c_str());
+  if (len != sizeof(SessionInfo)) {
     preferences.end();
+    Serial.println("[NVS] Session not found (or wrong size). Found length: " + String(len));
     return false;
   }
-  preferences.getBytes(key.c_str(), encrypted, 32);
+
+  preferences.getBytes(key.c_str(), encrypted, sizeof(SessionInfo));
   preferences.end();
   decryptSession(encrypted, session);
+
+  Serial.println("[NVS] Session loaded and decrypted from key: " + key);
   return true;
 }
 

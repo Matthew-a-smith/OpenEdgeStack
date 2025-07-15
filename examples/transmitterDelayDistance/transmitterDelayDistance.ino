@@ -1,12 +1,27 @@
+/*
+  OpenEdgeStack SX126x Transmit with Groups Example
+
+  This example demonstrates how to transmit single packets of data 
+  over raw LoRa using the SX126x module family.
+
+  This demostration ues the poll lora function were it waits up to 3 seconds to transmit data
+  This example uses a distance sensor and track the distance in cm after it crosses 20 cm 
+  it gets the distance waits and sends the packet.
+
+  Notes:
+  - Data is encrypted using appSKey before transmission.
+  - The transmitted packet format is:
+      [SenderID (8 bytes)] + [Encrypted Group Data] + [HMAC (8 bytes)]
+
+  - Other SX126x family modules are supported.
+*/
+
 #include <EndDevice.h>
 #include <LoraWANLite.h>
 #include <Sessions.h>
 
-// SENDER
 #include <RadioLib.h>
 #include <Wire.h>
-#include <SHA256.h>
-#include "mbedtls/md.h"
 #include <FS.h>
 #include <SPIFFS.h>
 
@@ -111,13 +126,13 @@ float measureDistance() {
   digitalWrite(TRIG_PIN, LOW);
   long duration = pulseIn(ECHO_PIN, HIGH, 30000);
   return duration * 0.034 / 2.0;
+  delay(2000);
 }
 
 void loop() {
   listenForIncoming();
 
   float distance = measureDistance();
-  delay(1500);
   if (distance > 20.0) {
     Serial.println("\n--- Distance Triggered Send ---");
     Serial.println("[INFO] Distance: " + String(distance, 1) + " cm");
@@ -128,7 +143,7 @@ void loop() {
     memcpy(distanceBytes, &distance, sizeof(float));
  
     // This waits 5 seconds (5000 ms) before sending
-    pollLora(distanceBytes, sizeof(distanceBytes), TYPE_FLOATS, 5000);
+    pollLora(distanceBytes, sizeof(distanceBytes), TYPE_FLOATS, 3000);
   } else {
     Serial.println("ID: " + devAddr);
     Serial.println("Dist: " + String(distance, 1) + " cm");

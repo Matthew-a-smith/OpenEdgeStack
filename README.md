@@ -1,4 +1,4 @@
-[![Build Status](https://github.com/Matthew-a-smith/Agent/blob/main/proxy.c)](https://github.com/Matthew-a-smith/Agent/blob/main/proxy.c)
+# OpenEdgeStack ![Build Status](https://github.com/Matthew-a-smith/OpenEdgeStack/tree/main)
 
 An open-source encryption library for [Arduino](https://arduino.cc/) to send and receive data using [LoRa](https://www.lora-alliance.org/) radios.
 

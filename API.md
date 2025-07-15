@@ -55,30 +55,75 @@ const uint8_t hmacKey[16] = {
 
 ---
 
-## Join Request
-
+## Join Request not working
 Send a join request **before** starting the receiver. This is required to successfully derive encryption keys.
 
-```cpp
-int maxRetries = 3;
-int attempts = 2;
-int timeout = 3000;
+## Sessions are not saveing 
+SPIFFS is required during setup before sending the join to save all of the session infomation.
 
-sendJoinRequest(maxRetries, timeout, attempts);
+```cpp
+void setup() {
+    if (!SPIFFS.begin(true)) {
+    Serial.println("[ERROR] SPIFFS Mount Failed");
+    while (true);  // prevent further operation
+  }
+  Serial.begin(115200);
+  pinMode(LED_PIN, OUTPUT);
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+  lastButtonState = digitalRead(BUTTON_PIN);
+
+  Serial.println("[INFO] LoRa Init...");
+  int state = lora.begin(frequency_plan);
+  if (state != RADIOLIB_ERR_NONE) {
+    Serial.println("[ERROR] LoRa Init FAIL");
+    while (true);
+  }
+
+  int maxRetries = 3;
+  int attempts = 2;
+  int timeout = 3000;
+  sendJoinRequest(maxRetries, timeout, attempts);  
+
+  lora.setDio1Action(setFlags);
+  lora.setPacketReceivedAction(setFlags);  
+  state = lora.startReceive();
+  if (state != RADIOLIB_ERR_NONE) {
+    Serial.printf("[LoRa] startReceive failed: %d\n", state);
+    while (true);
+  }
+}
 ```
 
 ---
 
-## Start Receiving
+## Start Receiving on gateway
 
 ```cpp
-lora.setDio1Action(setFlags);
-lora.setPacketReceivedAction(setFlags);
+void setup() {
+  if (!SPIFFS.begin(true)) {
+    Serial.println("[ERROR] SPIFFS Mount Failed");
+    while (true);  // prevent further operation
+  }
+  Serial.begin(115200);
 
-int state = lora.startReceive();
-if (state != RADIOLIB_ERR_NONE) {
-  Serial.printf("[LoRa] startReceive failed: %d\n", state);
-  while (true);
+
+  delay(1000);
+  // LoRa
+  int state = lora.begin(frequency_plan);
+  if (state != RADIOLIB_ERR_NONE) {
+        Serial.printf("[LoRa] LoRa Init FAIL: %d\n", state);
+    while (true);
+  }
+  
+  lora.setDio1Action(setFlags);
+  lora.setPacketReceivedAction(setFlags);  
+  state = lora.startReceive();
+  if (state != RADIOLIB_ERR_NONE) {
+    Serial.printf("[LoRa] startReceive failed: %d\n", state);
+    while (true);
+  }
+
+  Serial.println("[Setup] Setup complete.");
 }
 ```
 
@@ -86,6 +131,12 @@ if (state != RADIOLIB_ERR_NONE) {
 
 ## Sending Packets
 
+Each packet contains up to 256 bytes of data, in the form of:
+  - Arduino String
+  - null-terminated char array (C-string)
+  - arbitrary binary data (byte array)
+  - floats (4 bytes)
+  
 ### Normal Encrypted Send
 
 Send a single encrypted packet.
