@@ -90,36 +90,6 @@ Packets can be grouped into bins in memory and sent later as a bulk encrypted bl
 
 ---
 
-### Group Settings
-
-| Setting            | Description                                         |
-| ------------------ | --------------------------------------------------- |
-| `maxFileSize`      | Max bytes allowed per group file                    |
-| `groupLimit`       | Max total group files per prefix                    |
-| `groupPrefixLimit` | Max unique group name prefixes (e.g., Grp1, Grp1.1) |
-
----
-
-### Function Parameters
-
-| Parameter Type    | Name     |
-| ----------------- | -------- |
-| `const uint8_t *` | data     |
-| `size_t`          | length   |
-| `enum DataType`   | dataType |
-| `const char *`    | pathBase |
-
----
-
-### Supported Data Types
-
-| Data Type     |
-| ------------- |
-| `TYPE_TEXT`   |
-| `TYPE_BYTES`  |
-| `TYPE_FLOATS` |
-
----
 
 ### Group Configuration Example
 
