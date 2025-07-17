@@ -175,14 +175,18 @@ You can also send messages immediately (without grouping), and they’ll still b
   pollLora((const uint8_t*)groupOne.c_str(), groupOne.length(), TYPE_TEXT, 5000);
 
 ```
----
 
+---
+## Wiki
+
+See [https://github.com/Matthew-a-smith/OpenEdgeStack.wiki.git](https://github.com/Matthew-a-smith/OpenEdgeStack.wiki.git)
+
+---
 ## API
 
 See [API.md](API.md)
 
 ---
-
 ## Examples
 
 See the [examples](examples) folder.
