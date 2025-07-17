@@ -11,6 +11,49 @@
 Preferences preferences;
 std::map<String, SessionInfo> sessionMap;
 
+String encodeDevEUI() {
+  return bytesToHex(devEUI, 8);
+}
+
+String devEUIToString(const uint8_t* id, size_t len) {
+  return bytesToHex(id, len);
+}
+
+String bytesToHex(const uint8_t* data, size_t len) {
+  String hex = "";
+  for (size_t i = 0; i < len; i++) {
+    if (data[i] < 0x10) hex += "0";
+    hex += String(data[i], HEX);
+  }
+  return hex;
+}
+
+String idToHexString(uint8_t* id, size_t len) {
+  String out = "";
+  for (int i = 0; i < len; i++) {
+    if (id[i] < 0x10) out += "0";
+    out += String(id[i], HEX);
+  }
+  return out;
+}
+
+size_t trimTrailingZeros(const uint8_t* data, size_t len) {
+  while (len > 0 && data[len - 1] == 0) {
+    len--;
+  }
+  return len;
+}
+
+
+
+void printHex(const uint8_t* data, size_t len, const char* label) {
+  Serial.print(label);
+  for (size_t i = 0; i < len; i++) {
+    if (data[i] < 0x10) Serial.print('0');
+    Serial.print(data[i], HEX);
+  }
+  Serial.println();
+}
 
 // Session key derivation as per LoRaWAN 1.0 spec
 void deriveSessionKey(uint8_t* outKey, uint8_t keyType, const uint8_t* appKey,
@@ -25,43 +68,40 @@ void deriveSessionKey(uint8_t* outKey, uint8_t keyType, const uint8_t* appKey,
   aes128_encrypt_block(appKey, input, outKey);
 }
 
+void flushSessionFor(const String& devEUI) {
+  sessionMap.erase(devEUI);  // remove from RAM
+
+  String key = devEUI.substring(0, 8);
+  preferences.begin("lora", false);
+  preferences.remove(key.c_str());
+  preferences.end();
+
+  Serial.println("[NVS] Session flushed for: " + devEUI);
+}
+
+
 void saveSessionToNVS(const String& devEUI, SessionInfo session) {
   uint8_t encrypted[sizeof(SessionInfo)];
   encryptSession(session, encrypted);
-  
-  String key = devEUI.substring(0, 8);  // Truncate to 8 characters
-  Serial.println("[NVS] Saving session to NVS:");
-  Serial.println("       Full devEUI: " + devEUI);
-  Serial.println("       Truncated key: " + key);
-
   preferences.begin("lora", false);
-  preferences.putBytes(key.c_str(), encrypted, sizeof(SessionInfo));
+  String key = devEUI.substring(0, 8);  // Truncate to 8 characters
+  preferences.putBytes(key.c_str(), encrypted, 32);
   preferences.end();
-
-  Serial.println("[NVS] Session saved under key: " + key);
 }
+
 
 bool loadSessionFromNVS(const String& devEUI, SessionInfo& session) {
   uint8_t encrypted[sizeof(SessionInfo)];
   String key = devEUI.substring(0, 8);  // Truncate to 8 characters
   
-  Serial.println("[NVS] Attempting to load session:");
-  Serial.println("       Full devEUI: " + devEUI);
-  Serial.println("       Truncated key: " + key);
-
   preferences.begin("lora", true);
-  size_t len = preferences.getBytesLength(key.c_str());
-  if (len != sizeof(SessionInfo)) {
+  if (preferences.getBytesLength(key.c_str()) != sizeof(SessionInfo)) {
     preferences.end();
-    Serial.println("[NVS] Session not found (or wrong size). Found length: " + String(len));
     return false;
   }
-
-  preferences.getBytes(key.c_str(), encrypted, sizeof(SessionInfo));
+  preferences.getBytes(key.c_str(), encrypted, 32);
   preferences.end();
   decryptSession(encrypted, session);
-
-  Serial.println("[NVS] Session loaded and decrypted from key: " + key);
   return true;
 }
 

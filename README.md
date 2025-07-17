@@ -1,7 +1,6 @@
-# OpenEdgeStack ![Build Status](https://github.com/Matthew-a-smith/OpenEdgeStack/tree/main)
+# OpenEdgeStack
 
-An open-source encryption library for [Arduino](https://arduino.cc/) to send and receive data using [LoRa](https://www.lora-alliance.org/) radios.
-
+OpenEdgeStack is an open-source encryption library for Arduino that enables secure communication over LoRa radios without the need for LoRaWAN gateways or backend infrastructure.
 ---
 
 ## Compatible Hardware
@@ -27,6 +26,10 @@ Key Features:
 - Sessions are **stored in RAM** and persist across reboots
 - Designed for lightweight operation between multiple edge devices and gateways
 
+Note:
+Currently, this library provides the encrypted LoRa communication layer.
+A future extension is planned to add an MQTT-based console for viewing data when a network connection is available.
+
 ---
 
 ### Transmission Flow
@@ -38,41 +41,82 @@ Send JoinReq          ───────────▶  Parse & verify
 Receive JoinAccept    ◀───────────  Send encrypted JoinAccept
 Derive session keys
 ```
+### Session Handling for End Devices
+To enable secure communication, each end device must first call sendJoinRequest() during setup. This step allows the device to receive a join response and derive its encryption session keys.
 
-On end devices, make sure to call sendJoinRequest() before starting lora.startReceive().
-This is essential because the join request logic only listens for a response during the timeout window right after sending. If startReceive() is called too early, the join response may not be received correctly, and the device will fail to derive encryption keys.
-
-Do not add the join to the device being used as a gateway and make sure that the gateway is always listening so it can handle join requests and add other devices.
+If sendJoinRequest() is called too early—before the radio enters receive mode—the join response may be missed, resulting in failed session negotiation.
 
 ```cpp
-//For end devices / transmitters
-void setup() {
-  int maxRetries = 3;
-  int attempts = 2;
-  int timeout = 3000;
-  sendJoinRequest(maxRetries, timeout, attempts);  
+// For end devices (transmitters)
+Module module(LORA_CS, LORA_DIO1, LORA_RST, LORA_BUSY); // Pin configuration
+SX1262 radioModule(&module);                            // Create SX1262 instance
+PhysicalLayer* lora = &radioModule;                     // Set global radio pointer
+float frequency_plan = 915.0;                           // Frequency (in MHz)
 
-  lora.setDio1Action(setFlags);
-  lora.setPacketReceivedAction(setFlags);  
-  state = lora.startReceive();
-  if (state != RADIOLIB_ERR_NONE) {
-    Serial.printf("[LoRa] startReceive failed: %d\n", state);
+void setup() {
+  // Mount SPIFFS to persist sessions across reboots
+  if (!SPIFFS.begin(true)) {
+    Serial.println("[ERROR] SPIFFS Mount Failed");
     while (true);
   }
-}
 
-//For gateway / recivers
-void setup() {
-  lora.setDio1Action(setFlags);
-  lora.setPacketReceivedAction(setFlags);  
-  state = lora.startReceive();
+  // Register the chosen radio module globally
+  setRadioModule(&radioModule);  
+  delay(1000);
+
+  // Initialize the radio module
+  int state = radioModule.begin(frequency_plan);
   if (state != RADIOLIB_ERR_NONE) {
-    Serial.printf("[LoRa] startReceive failed: %d\n", state);
+    Serial.printf("[LoRa] Init FAILED: %d\n", state);
     while (true);
   }
+
+  // Set flags and begin listening
+  radioModule.setDio1Action(setFlags);
+  radioModule.setPacketReceivedAction(setFlags);
+  
+  state = radioModule.startReceive();
+  if (state != RADIOLIB_ERR_NONE) {
+    Serial.printf("[LoRa] startReceive FAILED: %d\n", state);
+    while (true);
+  }
+  // IMPORTANT: Send join request AfTER enabling receive mode
+  int maxRetries = 3 //Number of retries
+  int retryDelay = 3000 //Timeout per attempt in milliseconds
+   sendJoinRequest(maxRetries, retryDelay);  // Wait for session handshake
 }
 
 ```
+### Radio Module Integration
+The radio module (e.g., SX1262) is accessed using a PhysicalLayer* pointer.
+This allows for generic access to shared radio methods such as:
+
+  - readData()
+
+  - startReceive() 
+
+### Session Management on the Gateway
+
+Multiple end devices (sensors, nodes, etc.) can connect to a single gateway—typically up to 8 or more depending on available memory.
+
+Each device must send a valid JoinRequest() using its unique 8-byte DevEUI.
+
+Upon acceptance, the gateway derives and stores session keys (AppSKey, NwkSKey) associated with that DevEUI.
+
+  There's no hardcoded limit to how many devices can join The real constraints are:
+
+  - RAM: For storing active sessions at runtime.
+
+  - Flash: If you choose to persist sessions across reboots.
+
+### Session Flushing & Recovery
+
+If a device loses its session (e.g., due to memory wipe), it can simply re-join.
+
+The gateway will flush any stale session tied to the same DevEUI upon recognizing a new valid JoinRequest().
+
+You can configure retry attempts and timeouts to allow a device to automatically reattempt a join if its session becomes invalid or lost.
+
 ---
 
 ### Packet Format
@@ -83,7 +127,8 @@ void setup() {
 
 ### Grouped Packet Storage
 
-Packets can be grouped into bins in memory and sent later as a bulk encrypted blob. This reduces transmission frequency and increases efficiency.
+Packets can be grouped into bins and stored in memory or on disk, then transmitted later as a single encrypted blob.
+This reduces transmission frequency and improves energy efficiency.
 
 * Groups can be up to **255 bytes**
 * Overflow is handled by creating new group files with prefixes
@@ -122,9 +167,9 @@ storePacket((const uint8_t*)groupOne.c_str(), groupOne.length(), TYPE_TEXT, Grou
 // When ready
 sendStoredGroupFile(Group1);
 ```
-## Normral messages
-you can also send data normally encrypted as well with the following.
-and their also a pollsend that delays the packet before sending it.
+## Normal messages
+You can also send messages immediately (without grouping), and they’ll still be encrypted.
+
 ```cpp
   String payload = "this is a test sentence up to and over 16 bytes in length";
   sendLora((const uint8_t*)groupOne.c_str(), groupOne.length(), TYPE_TEXT);
@@ -152,7 +197,18 @@ See the [examples](examples) folder.
 **1) What libraries are required?**
 This library builds on top of [RadioLib](https://github.com/jgromes/RadioLib). It handles encryption and addressing only — radio handling is left to the underlying library.
 
-## Quick Links
+
+```cpp
+#include <RadioLib.h>
+
+//Optional used for perstiance and storage
+#include <Preferences.h>
+#include <FS.h>
+#include <SPIFFS.h>
+#include <map>
+```
+
+## Quick Links to radio Lib
 
 - 📖 [**Wiki**](https://github.com/jgromes/RadioLib/wiki) – usage documentation  
 - ❓ [**FAQ**](https://github.com/jgromes/RadioLib/wiki/Frequently-Asked-Questions)  

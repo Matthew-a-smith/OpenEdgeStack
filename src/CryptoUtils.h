@@ -6,14 +6,6 @@
 #include <Arduino.h>
 #include <LoraWANLite.h>
 
-
-
-String bytesToHex(const uint8_t* data, size_t len);
-String encodeDevEUI();
-String devEUIToString(const uint8_t* id, size_t len = 8);
-String idToHexString(uint8_t* id, size_t len = 8);
-size_t trimTrailingZeros(const uint8_t* data, size_t len);
-
 uint8_t* encryptAndPackage(
   const uint8_t* payloadData, size_t payloadLen,
   const SessionInfo& session,

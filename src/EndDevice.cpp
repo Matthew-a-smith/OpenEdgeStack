@@ -6,9 +6,9 @@
 #include <Arduino.h>
 #include <RadioLib.h>
 #include <Preferences.h>
-
 #include <FS.h>
 #include <SPIFFS.h>
+
 
 // ────── Join Request Struct & Buffers ───────────────────────────────
 String devEUIHex = idToHexString(devEUI);
@@ -72,68 +72,71 @@ bool handleJoinAccept(uint8_t* buffer, size_t len) {
 // 0      | 8    | devEUI      | Device unique identifier
 // 8      | 8    | appEUI      | Application identifier
 // 16     | 2    | devNonce    | Random nonce for this join request (little-endian)
-
 struct JoinRequest {
   uint8_t devEUI[8];
   uint8_t appEUI[8];
   uint16_t devNonce;
 };
 
-void sendJoinRequest(int maxRetries, int timeout, int attempt) {
-  bool ackReceived = false;
-
+void sendJoinRequest(int maxRetries, unsigned long retryDelay) {
   SessionInfo session;
   SessionStatus status = verifySession(devEUIHex, session);
   if (status == SESSION_OK) {
     Serial.println("[JOIN] Session already exists. Skipping join.");
     return;
   }
-  Serial.println("[JOIN] Detected JoinRequest from new device.");
-  
-  uint16_t devNonce = 0;
-  devNonce = esp_random() & 0xFFFF;
 
-  JoinRequest joinReq;
-  memcpy(joinReq.devEUI, devEUI, 8);
-  memcpy(joinReq.appEUI, appEUI, 8);
-  joinReq.devNonce = devNonce;
+  bool ackReceived = false;
 
-  uint8_t buffer[22];  // 18 bytes data + 4 bytes MIC
-  memcpy(buffer, joinReq.devEUI, 8);
-  memcpy(buffer + 8, joinReq.appEUI, 8);
-  buffer[16] = joinReq.devNonce & 0xFF;
-  buffer[17] = (joinReq.devNonce >> 8) & 0xFF;
+  for (int attempt = 1; attempt <= maxRetries; attempt++) {
+    Serial.printf("[JOIN] Attempt %d of %d\n", attempt, maxRetries);
 
-  // Compute 4-byte MIC over first 18 bytes
-  uint8_t mic[32];  // Full HMAC result
-  computeHMAC_SHA256(hmacKey, sizeof(hmacKey), buffer, 18, mic);
+    uint16_t devNonce = esp_random() & 0xFFFF;
 
-  // Copy first 4 bytes of HMAC into buffer
-  memcpy(buffer + 18, mic, 4);
+    JoinRequest joinReq;
+    memcpy(joinReq.devEUI, devEUI, 8);
+    memcpy(joinReq.appEUI, appEUI, 8);
+    joinReq.devNonce = devNonce;
 
+    uint8_t buffer[22];
+    memcpy(buffer, joinReq.devEUI, 8);
+    memcpy(buffer + 8, joinReq.appEUI, 8);
+    buffer[16] = devNonce & 0xFF;
+    buffer[17] = (devNonce >> 8) & 0xFF;
 
-  for (int retries = 0; retries < maxRetries && !ackReceived; ++retries) {
-  lora.transmit(buffer, sizeof(buffer));
-  Serial.println("[JOIN] Sent Join Request");
-  String joinReply;
-  unsigned long start = millis();
-  while (millis() - start < (unsigned long)timeout) {
-    if (lora.receive(joinReply, 0) == RADIOLIB_ERR_NONE && joinReply.length() == 16) {
+    uint8_t mic[32];
+    computeHMAC_SHA256(hmacKey, sizeof(hmacKey), buffer, 18, mic);
+    memcpy(buffer + 18, mic, 4);
+
+    transmissonFlag = true;
+    lora->standby();
+    delay(5);
+    lora->transmit(buffer, sizeof(buffer));
+    delay(10);
+    lora->startReceive();
+
+    String joinReply;
+    if (lora->receive(joinReply, 0) == RADIOLIB_ERR_NONE && joinReply.length() == 16) {
       uint8_t raw[16];
       for (int i = 0; i < 16; i++) raw[i] = joinReply[i];
       if (handleJoinAccept(raw, 16)) {
-        verifySession(devEUIHex, session);  
+        verifySession(devEUIHex, session);
         ackReceived = true;
-
-        return;
+        transmissonFlag = false;
+        Serial.println("[JOIN] Join successful.");
+        break;
       }
     }
-    delay(50);
+
+    transmissonFlag = false;
+    Serial.println("[JOIN] No valid reply. Retrying...");
+    if (attempt < maxRetries) delay(retryDelay);
+  }
+
+  if (!ackReceived) {
+    Serial.println("[JOIN] Join failed after maximum attempts.");
   }
 }
-  Serial.println("[ERROR] OTAA Join failed.");
-}
-
 
 // ────── Local Storage File Layout (One group per file) ──────
 // Filename: /group_<index>.bin
@@ -262,13 +265,13 @@ bool sendGroupFileAtPath(const char* path, bool finalSend = true) {
   uint8_t* finalPacket = encryptAndPackage(packetData.data(), packetData.size(), session, finalLen, devEUI);
 
   transmissonFlag = true;
-  lora.standby();
+  lora->standby();
   delay(5);
-  int result = lora.transmit(finalPacket, finalLen);
+  int result = lora->transmit(finalPacket, finalLen);
   delay(10);
 
   if (finalSend) {
-    lora.startReceive();
+    lora->startReceive();
   }
 
   transmissonFlag = false;
@@ -317,24 +320,18 @@ void sendStoredGroupFile(const char* pathBase) {
 void sender(const uint8_t* finalPacket, size_t finalLen) {
 
   transmissonFlag = true;
-  lora.standby();
+  lora->standby();
   delay(5);
-  int result = lora.transmit(finalPacket, finalLen);
+  int result = lora->transmit(finalPacket, finalLen);
   delay(10);                      
-  int rxState = lora.startReceive();
+  int rxState = lora->startReceive();
   transmissonFlag = false;    
   if (result == RADIOLIB_ERR_NONE) {
     Serial.println("[ACK] Sent successfully.");
   } else {
     Serial.println("[ACK] Failed to send ACK.");
   }
-  delete[] finalPacket;
-
 }
-
-
-
-
 
 
 // ────── Polling Packet Format via encryptAndPackage() ──────
@@ -388,8 +385,6 @@ void pollLora(
 }
 
 
-
-
 // ────── ACKed Packet Format (Same as encryptAndPackage) ──────
 // Offset | Size          | Field          | Description
 // -------|---------------|----------------|------------------------------
@@ -440,6 +435,11 @@ void handlePacket(uint8_t* buffer, size_t length) {
 
   String srcIDString = idToHexString(srcID);
 
+  if (payload == gatewayEUI) {
+    flushSessionFor(srcIDString);
+    printHex(payload, payloadLength, "[INFO] Payload bytes: ");
+  }
+
   SessionInfo session;
   SessionStatus status = verifySession(srcIDString, session);
   if (status != SESSION_OK) {
@@ -484,10 +484,10 @@ void listenForIncoming() {
   if (receivedFlag) {
     receivedFlag = false;
      
-    int packetLength = lora.getPacketLength();
+    int packetLength = lora->getPacketLength();
     if (packetLength > 0) {
       uint8_t buffer[255];
-      int state = lora.readData(buffer, packetLength);
+      int state = lora->readData(buffer, packetLength);
       handlePacket(buffer, packetLength );
     
     if (state == RADIOLIB_ERR_NONE) {

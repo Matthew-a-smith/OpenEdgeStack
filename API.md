@@ -6,6 +6,12 @@
 ```arduino
 #include <LoraWANLite.h>
 #include <EndDevice.h>
+
+#include <RadioLib.h>
+#include <Wire.h>
+
+#include <FS.h>
+#include <SPIFFS.h>
 ```
 
 ---
@@ -24,11 +30,13 @@ The following parameters are required:
 - HMAC Key (16 bytes)
 
 ```cpp
+Module module(LORA_CS, LORA_DIO1, LORA_RST, LORA_BUSY); // Pin configuration
+SX1262 radioModule(&module);                            // Create SX1262 instance
+PhysicalLayer* lora = &radioModule;                     // Set global radio pointer
+float frequency_plan = 915.0;                           // Frequency (in MHz)
+
 // Frequency in MHz
 float frequency_plan = 915.0;
-
-// Create LoRa module instance (example: SX1262)
-SX1262 lora = new Module(LORA_CS, LORA_DIO1, LORA_RST, LORA_BUSY);
 
 // Device EUI (64-bit unique device ID)
 uint8_t devEUI[8] = {
@@ -56,42 +64,64 @@ const uint8_t hmacKey[16] = {
 ---
 
 ## Join Request not working
-Send a join request **before** starting the receiver. This is required to successfully derive encryption keys.
+On end devices, it's essential to call sendJoinRequest() during setup.
+This ensures the device can properly receive the join response and derive session keys for encryption.
+
+If sendJoinRequest() is called too early, the join response might be missed due to the radio not being in receive mode. This can result in failed session negotiation and no encryption keys.
+
 
 ## Sessions are not saveing 
 SPIFFS is required during setup before sending the join to save all of the session infomation.
+You can connect multiple end devices (e.g., sensors, nodes, etc.) to a single gateway — usually up to 8 or more depending on memory.
+
+Each device must send a valid JoinRequest() first. Once accepted, the session keys are derived and stored separately using the unique 8-byte DevEUI of that device.
+
+There’s no hardcoded limit to how many devices can join. The only constraints are the available RAM (for runtime session storage) and flash space (if persisting sessions across reboots).
 
 ```cpp
+
+```cpp
+// For end devices (transmitters)
+Module module(LORA_CS, LORA_DIO1, LORA_RST, LORA_BUSY); // Pin configuration
+SX1262 radioModule(&module);                            // Create SX1262 instance
+PhysicalLayer* lora = &radioModule;                     // Set global radio pointer
+float frequency_plan = 915.0;                           // Frequency (in MHz)
+
 void setup() {
-    if (!SPIFFS.begin(true)) {
+  // Mount SPIFFS to persist sessions across reboots
+  if (!SPIFFS.begin(true)) {
     Serial.println("[ERROR] SPIFFS Mount Failed");
-    while (true);  // prevent further operation
-  }
-  Serial.begin(115200);
-  pinMode(LED_PIN, OUTPUT);
-  pinMode(BUTTON_PIN, INPUT_PULLUP);
-  lastButtonState = digitalRead(BUTTON_PIN);
-
-  Serial.println("[INFO] LoRa Init...");
-  int state = lora.begin(frequency_plan);
-  if (state != RADIOLIB_ERR_NONE) {
-    Serial.println("[ERROR] LoRa Init FAIL");
     while (true);
   }
 
-  int maxRetries = 3;
-  int attempts = 2;
-  int timeout = 3000;
-  sendJoinRequest(maxRetries, timeout, attempts);  
+  // Register the chosen radio module globally
+  setRadioModule(&radioModule);  
+  delay(1000);
 
-  lora.setDio1Action(setFlags);
-  lora.setPacketReceivedAction(setFlags);  
-  state = lora.startReceive();
+  // Initialize the radio module
+  int state = radioModule.begin(frequency_plan);
   if (state != RADIOLIB_ERR_NONE) {
-    Serial.printf("[LoRa] startReceive failed: %d\n", state);
+    Serial.printf("[LoRa] Init FAILED: %d\n", state);
     while (true);
   }
+
+  // Set flags and begin listening
+  radioModule.setDio1Action(setFlags);
+  radioModule.setPacketReceivedAction(setFlags);
+  
+  state = radioModule.startReceive();
+  if (state != RADIOLIB_ERR_NONE) {
+    Serial.printf("[LoRa] startReceive FAILED: %d\n", state);
+    while (true);
+  }
+  // IMPORTANT: Send join request AfTER enabling receive mode
+  int maxRetries = 3; //Number of retries
+  int retryDelay = 3000; //Timeout per attempt in milliseconds
+   sendJoinRequest(maxRetries, retryDelay);  // Wait for session handshake
 }
+
+```
+
 ```
 
 ---
@@ -105,19 +135,27 @@ void setup() {
     while (true);  // prevent further operation
   }
   Serial.begin(115200);
+  delay(100);
+  sessionMap.clear();
+  Serial.println("[DEBUG] Cleared RAM session map.");
+  preferences.begin("lora", false);  // open for lifetime
+  preferences.clear();
+   preferences.end();
+   Serial.println("[NVS] All sessions cleared from NVS.");
 
-
+  setRadioModule(&radioModule);  // ✅ this is valid no
   delay(1000);
+
   // LoRa
-  int state = lora.begin(frequency_plan);
+  int state = radioModule.begin(frequency_plan);
   if (state != RADIOLIB_ERR_NONE) {
         Serial.printf("[LoRa] LoRa Init FAIL: %d\n", state);
     while (true);
   }
   
-  lora.setDio1Action(setFlags);
-  lora.setPacketReceivedAction(setFlags);  
-  state = lora.startReceive();
+  radioModule.setDio1Action(setFlags);
+  radioModule.setPacketReceivedAction(setFlags);  
+  state = radioModule.startReceive();
   if (state != RADIOLIB_ERR_NONE) {
     Serial.printf("[LoRa] startReceive failed: %d\n", state);
     while (true);
@@ -136,7 +174,7 @@ Each packet contains up to 256 bytes of data, in the form of:
   - null-terminated char array (C-string)
   - arbitrary binary data (byte array)
   - floats (4 bytes)
-  
+
 ### Normal Encrypted Send
 
 Send a single encrypted packet.
@@ -159,6 +197,32 @@ pollLora((const uint8_t*)payload.c_str(), payload.length(), TYPE_TEXT, 5000); //
 ## Grouped Packet Storage
 
 Packets can be grouped and sent later as bulk encrypted files to reduce transmission frequency.
+everything includeing groups gets paddded to the nearest 16 for AES standards.
+
+group settings  can be change depending on size requirements
+maxFileSize applies only to the raw stored group files on the sender  
+not to the final encrypted and transmitted LoRa packets, which will grow due to 
+padding, metadata, and HMAC.
+
+  Storage logic overview:
+
+  Each entry stored to a group file follows this format:
+    [2-byte length][1-byte type][N-byte raw payload]
+
+  So, total entry size = 2 + 1 + N bytes
+
+  Important considerations:
+  - AES encryption works in 16-byte blocks.
+  - Therefore, the raw payload is padded to the next multiple of 16 before encryption.
+  - Final encrypted packet structure:
+      - 8 bytes  : Sender ID
+      - N bytes  : Encrypted payload (AES padded)
+      - 8 bytes  : HMAC
+    → Total size = 8 + padded(N) + 8 bytes
+
+  Keep this in mind when designing how much data you store per group file,
+  especially when you want to avoid splitting into multiple files due to size limits.
+
 
 ### Group Settings
 

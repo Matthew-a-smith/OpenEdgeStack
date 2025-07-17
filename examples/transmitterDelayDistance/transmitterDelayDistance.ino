@@ -1,19 +1,20 @@
 /*
-  OpenEdgeStack SX126x Transmit with Groups Example
+  OpenEdgeStack SX126x - Transmit with Groups Example
 
-  This example demonstrates how to transmit single packets of data 
-  over raw LoRa using the SX126x module family.
+  This example demonstrates how to transmit encrypted packets using the SX126x
+  LoRa module family and OpenEdgeStack.
 
-  This demostration ues the poll lora function were it waits up to 3 seconds to transmit data
-  This example uses a distance sensor and track the distance in cm after it crosses 20 cm 
-  it gets the distance waits and sends the packet.
-
+  Functionality:
+  - Uses an ultrasonic distance sensor to monitor distance in cm.
+  - When the measured distance exceeds 20 cm, the value is read, encrypted,
+    and transmitted over LoRa.
+  - Utilizes `pollLora()` with a 3-second timeout for sending.
+  
   Notes:
-  - Data is encrypted using appSKey before transmission.
+  - Data is encrypted using AppSKey before transmission.
   - The transmitted packet format is:
       [SenderID (8 bytes)] + [Encrypted Group Data] + [HMAC (8 bytes)]
-
-  - Other SX126x family modules are supported.
+  - Compatible with all SX126x family LoRa modules.
 */
 
 #include <EndDevice.h>
@@ -69,15 +70,7 @@ void setFlags() {
 }
 
 void setup() {
-  if (!SPIFFS.begin(true)) {
-    Serial.println("[ERROR] SPIFFS Mount Failed");
-    while (true);
-  }
-  Serial.begin(115200);
-
-  Serial.println("Sender ID: " + devAddr);
-  Serial.println("[DEBUG] Starting setup...");
-
+ 
   randomSeed(analogRead(0));
 
   pinMode(Vext, OUTPUT);
@@ -87,35 +80,41 @@ void setup() {
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
 
+  // Mount SPIFFS to persist sessions across reboots
+ if (!SPIFFS.begin(true)) {
+    Serial.println("[ERROR] SPIFFS Mount Failed");
+    while (true);  // prevent further operation
+  }
   Serial.begin(115200);
+  delay(100);
+
+  // Register the chosen radio module globally
+  setRadioModule(&radioModule);  
+  delay(1000);
+
+  // Initialize the radio module
   Serial.println("[INFO] LoRa Init...");
-
- 
-  sessionMap.clear();
-  Serial.println("[DEBUG] Cleared RAM session map.");
-  preferences.begin("lora", false);
-  preferences.clear();
-  preferences.end();
-  Serial.println("[NVS] All sessions cleared from NVS.");
-
-  int state = lora.begin(frequency_plan);
+  int state = radioModule.begin(frequency_plan);
   if (state != RADIOLIB_ERR_NONE) {
-    Serial.println("[ERROR] LoRa Init FAIL");
+    Serial.printf("Radio init failed: %d\n", state);
     while (true);
   }
-
-  int maxRetries = 3;
-  int attempts = 2;
-  int timeout = 3000;
-  sendJoinRequest(maxRetries, timeout, attempts);  
-
-  lora.setDio1Action(setFlags);
-  lora.setPacketReceivedAction(setFlags);  
-  state = lora.startReceive();
+  // Set flags  
+  radioModule.setDio1Action(setFlags);
+  radioModule.setPacketReceivedAction(setFlags);
+  
+  // begin listening
+  state = radioModule.startReceive();
   if (state != RADIOLIB_ERR_NONE) {
     Serial.printf("[LoRa] startReceive failed: %d\n", state);
     while (true);
   }
+  Serial.println("[Setup] Setup complete.");
+
+  // IMPORTANT: Send join request AfTER enabling receive mode
+  int maxRetries = 3 //Number of retries
+  int retryDelay = 3000 //Timeout per attempt in milliseconds
+  sendJoinRequest(maxRetries, retryDelay);  // Wait for session handshake   
 }
 
 float measureDistance() {

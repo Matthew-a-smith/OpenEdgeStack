@@ -1,3 +1,5 @@
+//lLite
+
 #include <Arduino.h>
 #include <Preferences.h>
 #include <RadioLib.h>
@@ -8,6 +10,11 @@
 #include "EndDevice.h"
 
 
+
+void setRadioModule(PhysicalLayer* module) {
+  lora = module;
+  
+}
 // ────── LoRa Communication ──────────────────────────────────────────
 
 // ────── Payload Layout Before Encryption ──────
@@ -122,8 +129,13 @@ void handleJoinRequest(uint8_t* buffer, size_t len) {
   uint8_t encryptedPayload[16];
   aes128_decrypt_block(appKey, payload, encryptedPayload); 
 
-
-  lora.transmit(encryptedPayload, sizeof(encryptedPayload));
+  transmissonFlag = true;
+  lora->standby();
+  delay(5);
+  lora->transmit(encryptedPayload, sizeof(encryptedPayload));
+  delay(10);                      
+  int rxState = lora->startReceive();
+  transmissonFlag = false;
   Serial.println("[JOIN] Sent encrypted JoinAccept");
 }
 
@@ -157,7 +169,8 @@ void handleLoRaPacket(uint8_t* buffer, size_t length) {
   String srcIDString = idToHexString(srcID);
 
   SessionInfo session;
-  if (verifySession(srcIDString, session) != SESSION_OK) {
+  SessionStatus status = verifySession(srcIDString, session);
+  if (status != SESSION_OK) {
     Serial.println("[ERROR] Session not found");
     return;
   }
@@ -182,8 +195,13 @@ void handleLoRaPacket(uint8_t* buffer, size_t length) {
   uint8_t decryptedPayload[payloadLength];
   decryptPayload(localAppSKey, payload, payloadLength, decryptedPayload);
   sendDataAck(srcIDString, srcID);
-
   printHex(decryptedPayload, payloadLength, "[INFO] Decrypted Payload: ");
+  String decryptedMessage = "";
+  for (size_t i = 0; i < payloadLength; i++) {
+    if (decryptedPayload[i] == 0x00) break;
+    decryptedMessage += (char)decryptedPayload[i];
+  }
+  globalReply = decryptedMessage;
 
   Serial.println("[INFO] Raw Binary:");
   for (size_t i = 0; i < payloadLength; i++) {
@@ -236,7 +254,7 @@ void handleLoRaPacket(uint8_t* buffer, size_t length) {
 
     case TYPE_FLOATS: {
       if (dataLength % sizeof(float) != 0) {
-        Serial.printf("[WARN] Float payload not 4-byte aligned (%d bytes)\n", dataLength);
+        Serial.printf("[WARN] Float payload not aligned (%d bytes)\n", dataLength);
       }
     
       size_t floatCount = dataLength / sizeof(float);
@@ -264,14 +282,15 @@ void handleLoRaPacket(uint8_t* buffer, size_t length) {
 
 
 void handleJoinIfNeeded(uint8_t* buffer, size_t len) {
-  String devEUI = idToHexString(buffer, 8);
+  String srcEUI = idToHexString(buffer, 8);
 
-  if (sessionExists(devEUI)) {
-    Serial.println("[JOIN] Already joined: " + devEUI);
+  if (sessionExists(srcEUI)) {
+    Serial.println("[JOIN] Already joined: " + srcEUI);
+    flushSessionFor(srcEUI);
     return;
   }
 
-  Serial.println("[JOIN] Proceeding with new join for " + devEUI);
+  Serial.println("[JOIN] Proceeding with new join for " + srcEUI);
   handleJoinRequest(buffer, len);
 }
 
@@ -282,14 +301,14 @@ void Recive() {
   if (!receivedFlag) return;
   receivedFlag = false;
 
-  int packetLength = lora.getPacketLength();
+  int packetLength = lora->getPacketLength();
   if (packetLength <= 0) {
     Serial.println("[RX] No valid packet length.");
     return;
   }
 
   uint8_t buffer[255];
-  int state = lora.readData(buffer, packetLength);
+  int state = lora->readData(buffer, packetLength);
 
   if (state != RADIOLIB_ERR_NONE) {
     Serial.print("[RX] Error reading data: ");
@@ -312,12 +331,32 @@ void Recive() {
   }
 
   // Restart receiver properly
-  int rx = lora.startReceive();
+  int rx = lora->startReceive();
   if (rx != RADIOLIB_ERR_NONE) {
     Serial.print("[ERROR] Failed to restart receive: ");
     Serial.println(rx);
   }
 }
+
+
+void decryptPayloadWithKey(uint8_t* appSKey, uint8_t* payload, size_t payloadLength, uint8_t* out) {
+  decryptPayload(appSKey, payload, payloadLength, out);
+}
+
+void printBinaryBits(uint8_t* payload, size_t length) {
+  Serial.println("[INFO] Raw Binary:");
+  for (size_t i = 0; i < length; i++) {
+    for (int b = 7; b >= 0; b--) {
+      Serial.print((payload[i] >> b) & 0x01);
+    }
+    Serial.print(" ");
+    if ((i + 1) % 8 == 0) Serial.println();
+  }
+  if (length % 8 != 0) Serial.println();
+}
+
+
+
 
 
 

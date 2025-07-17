@@ -27,23 +27,27 @@ extern volatile bool transmissonFlag;
 extern volatile bool receivedFlag;
 
 // ─────────────────────────────────────────────
-// LoRa Module & Frequency Configuration
+// LoRa Module Configuration
 // ─────────────────────────────────────────────
-extern SX1262 lora;
-extern float frequency_plan;           // MHz, e.g., 868.1
 
+extern PhysicalLayer* lora;   // pointer to any RadioLib-compatible module
 // ─────────────────────────────────────────────
 // Device & Application IDs (must be 8 or 16 bytes)
 // ─────────────────────────────────────────────
 extern uint8_t devEUI[8];              // Device EUI (64-bit)
 extern uint8_t appEUI[8];              // Application EUI (64-bit)
 extern uint8_t appKey[16];             // App root key (AES-128)
-extern const uint8_t hmacKey[16];      // HMAC key (shared)
 
+extern const uint8_t hmacKey[16];      // HMAC key (shared)
 // ─────────────────────────────────────────────
 // Function Declarations
 // ─────────────────────────────────────────────
-
+/**
+ * @brief Sets the radio module globally
+ * 
+ * @param module // value for RadioLib-compatible module
+ */
+void setRadioModule(PhysicalLayer* module);
 /**
  * @brief Handle JoinRequest only if device has not joined yet.
  * 
@@ -75,6 +79,9 @@ void sendDataAck(const String& srcID, uint8_t* SenderID);
 void Recive();
 
 
+void printBinaryBits(uint8_t* payload, size_t length);
+
+void decryptPayloadWithKey(uint8_t* appSKey, uint8_t* payload, size_t payloadLength, uint8_t* out);
 
 
 

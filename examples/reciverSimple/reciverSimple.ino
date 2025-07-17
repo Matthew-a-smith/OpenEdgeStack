@@ -14,17 +14,13 @@
 
 */
 
-#include <LoraWANLite.h>
-#include <Sessions.h>
-
+#include <OpenEdgeStack.h>
 
 #include <RadioLib.h>
 #include <Preferences.h>
+
 #include <FS.h>
 #include <SPIFFS.h>
-#include <map>
-
-
 // ───── LoRa Configuration ─────────────────────────────
 
 // LoRa SX1262 pins for Heltec V3
@@ -33,7 +29,11 @@
 #define LORA_BUSY   13
 #define LORA_DIO1   14
 
-SX1262 lora = new Module(LORA_CS, LORA_DIO1, LORA_RST, LORA_BUSY);
+Module module(LORA_CS, LORA_DIO1, LORA_RST, LORA_BUSY);
+SX1262 radioModule(&module);
+
+PhysicalLayer* lora = &radioModule;
+
 float frequency_plan = 915.0;
 
 
@@ -70,38 +70,38 @@ void setFlags() {
 
 // ───── Setup ──────────────────────────────────────────
 void setup() {
-  if (!SPIFFS.begin(true)) {
+  // Mount SPIFFS to persist sessions across reboots
+ if (!SPIFFS.begin(true)) {
     Serial.println("[ERROR] SPIFFS Mount Failed");
     while (true);  // prevent further operation
   }
   Serial.begin(115200);
   delay(100);
-  sessionMap.clear();
-  Serial.println("[DEBUG] Cleared RAM session map.");
-  preferences.begin("lora", false);  // open for lifetime
-  preferences.clear();
-   preferences.end();
-   Serial.println("[NVS] All sessions cleared from NVS.");
 
+  // Register the chosen radio module globally
+  setRadioModule(&radioModule);  
   delay(1000);
-  // LoRa
-  int state = lora.begin(frequency_plan);
+
+  // Initialize the radio module
+  Serial.println("[INFO] LoRa Init...");
+  int state = radioModule.begin(frequency_plan);
   if (state != RADIOLIB_ERR_NONE) {
-        Serial.printf("[LoRa] LoRa Init FAIL: %d\n", state);
+    Serial.printf("Radio init failed: %d\n", state);
     while (true);
   }
+  // Set flags  
+  radioModule.setDio1Action(setFlags);
+  radioModule.setPacketReceivedAction(setFlags);
   
-  lora.setDio1Action(setFlags);
-  lora.setPacketReceivedAction(setFlags);  
-  state = lora.startReceive();
+  // begin listening
+  state = radioModule.startReceive();
   if (state != RADIOLIB_ERR_NONE) {
     Serial.printf("[LoRa] startReceive failed: %d\n", state);
     while (true);
   }
-
   Serial.println("[Setup] Setup complete.");
-}
 
+}
 
 void loop() {
   Recive();  

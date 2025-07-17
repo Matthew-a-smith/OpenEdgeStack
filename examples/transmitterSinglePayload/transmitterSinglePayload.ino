@@ -1,25 +1,26 @@
 /*
-  OpenEdgeStack SX126x Transmit with Groups Example
+  OpenEdgeStack SX126x - Simple Transmit Example
 
-  This example demonstrates how to transmit single packets of data 
-  over raw LoRa using the SX126x module family.
-
-  Each packet gets encrypted and sent when the button is pushed
+  This example demonstrates how to send a single encrypted LoRa packet 
+  using the SX126x module family when a button is pressed.
 
   Notes:
-  - Data is encrypted using appSKey before transmission.
+  - Data is encrypted using the AppSKey before transmission.
   - The transmitted packet format is:
-      [SenderID (8 bytes)] + [Encrypted Group Data] + [HMAC (8 bytes)]
-
-  - Other SX126x family modules are supported.
+      [SenderID (8 bytes)] + [Encrypted Payload] + [HMAC (8 bytes)]
+  - Compatible with other SX126x family modules.
 */
 
 #include <EndDevice.h>
 #include <LoraWANLite.h>
+#include <Sessions.h>
 
 // SENDER
 #include <RadioLib.h>
-#include <Wire.h>
+#include <Preferences.h>
+#include <FS.h>
+#include <SPIFFS.h>
+#include <map>
 
 
 
@@ -29,13 +30,17 @@
 #define LORA_BUSY   13
 #define LORA_DIO1   14
 
-#define BUTTON_PIN 7  // Change as needed
+#define BUTTON_PIN 0  // Change as needed
 #define LED_PIN    6 // Change as needed
 
 
 
+Module module(LORA_CS, LORA_DIO1, LORA_RST, LORA_BUSY);
+SX1262 radioModule(&module);
+
+PhysicalLayer* lora = &radioModule;
+
 float frequency_plan = 915.0;
-SX1262 lora = new Module(LORA_CS, LORA_DIO1, LORA_RST, LORA_BUSY);
 
 uint8_t devEUI[8] = {
   0x4F, 0x65, 0x75, 0xC5, 0xF0, 0x31, 0x00, 0x00
@@ -83,30 +88,41 @@ bool firstPressDone = false;
 bool awaitingAckForGroup1 = false;
 
 void setup() {
+ // Mount SPIFFS to persist sessions across reboots
+ if (!SPIFFS.begin(true)) {
+    Serial.println("[ERROR] SPIFFS Mount Failed");
+    while (true);  // prevent further operation
+  }
   Serial.begin(115200);
-  pinMode(LED_PIN, OUTPUT);
-  pinMode(BUTTON_PIN, INPUT_PULLUP);
-  lastButtonState = digitalRead(BUTTON_PIN);
+  delay(100);
 
+  // Register the chosen radio module globally
+  setRadioModule(&radioModule);  
+  delay(1000);
+
+  // Initialize the radio module
   Serial.println("[INFO] LoRa Init...");
-  int state = lora.begin(frequency_plan);
+  int state = radioModule.begin(frequency_plan);
   if (state != RADIOLIB_ERR_NONE) {
-    Serial.println("[ERROR] LoRa Init FAIL");
+    Serial.printf("Radio init failed: %d\n", state);
     while (true);
   }
-
-  int maxRetries = 3;
-  int attempts = 2;
-  int timeout = 3000;
-  sendJoinRequest(maxRetries, timeout, attempts);  
-
-  lora.setDio1Action(setFlags);
-  lora.setPacketReceivedAction(setFlags);  
-  state = lora.startReceive();
+  // Set flags  
+  radioModule.setDio1Action(setFlags);
+  radioModule.setPacketReceivedAction(setFlags);
+  
+  // begin listening
+  state = radioModule.startReceive();
   if (state != RADIOLIB_ERR_NONE) {
     Serial.printf("[LoRa] startReceive failed: %d\n", state);
     while (true);
   }
+  Serial.println("[Setup] Setup complete.");
+
+  // IMPORTANT: Send join request AfTER enabling receive mode
+  int maxRetries = 3; //Number of retries
+  int retryDelay = 3000; //Timeout per attempt in milliseconds
+  sendJoinRequest(maxRetries, retryDelay);  // Wait for session handshake
 }
 
 void loop() {
@@ -127,4 +143,3 @@ void loop() {
   lastButtonState = currentButtonState;
   delay(50);  // Debounce
 }
-

@@ -14,7 +14,7 @@ struct GroupConfig {
 
 // Must be defined by user sketch
 extern GroupConfig groupConfig;
-
+extern uint8_t gatewayEUI[8];
 // ─────────────────────────────────────────────
 // Function Declarations
 // ─────────────────────────────────────────────
@@ -47,10 +47,10 @@ void sender(const uint8_t* finalPacket, size_t finalLen);
  * @brief Sends a LoRaWAN JoinRequest and waits for JoinAccept.
  *
  * @param maxRetries Number of retries
- * @param timeout Timeout per attempt in milliseconds
- * @param attempt Current join attempt count
+ * @param retryDelay Timeout per attempt in milliseconds
+ * 
  */
-void sendJoinRequest(int maxRetries, int timeout, int attempt);
+void sendJoinRequest(int maxRetries, unsigned long retryDelay);
 
 /**
  * @brief Polls a target device for a response using encrypted packets.

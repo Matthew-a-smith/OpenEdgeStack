@@ -6,48 +6,7 @@
 #include "mbedtls/md.h"
 #include "mbedtls/aes.h"
 
-String encodeDevEUI() {
-  return bytesToHex(devEUI, 8);
-}
 
-String devEUIToString(const uint8_t* id, size_t len) {
-  return bytesToHex(id, len);
-}
-
-String bytesToHex(const uint8_t* data, size_t len) {
-  String hex = "";
-  for (size_t i = 0; i < len; i++) {
-    if (data[i] < 0x10) hex += "0";
-    hex += String(data[i], HEX);
-  }
-  return hex;
-}
-
-String idToHexString(uint8_t* id, size_t len) {
-  String out = "";
-  for (int i = 0; i < len; i++) {
-    if (id[i] < 0x10) out += "0";
-    out += String(id[i], HEX);
-  }
-  return out;
-}
-
-size_t trimTrailingZeros(const uint8_t* data, size_t len) {
-  while (len > 0 && data[len - 1] == 0) {
-    len--;
-  }
-  return len;
-}
-
-
-void printHex(const uint8_t* data, size_t len, const char* label) {
-  Serial.print(label);
-  for (size_t i = 0; i < len; i++) {
-    if (data[i] < 0x10) Serial.print('0');
-    Serial.print(data[i], HEX);
-  }
-  Serial.println();
-}
 
 // ────── HMAC-SHA256 Computation ──────
 
