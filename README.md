@@ -1,6 +1,7 @@
 # OpenEdgeStack
 
 OpenEdgeStack is an open-source encryption library for Arduino that enables secure communication over LoRa radios without the need for LoRaWAN gateways or backend infrastructure.
+
 ---
 
 ## Compatible Hardware
@@ -9,9 +10,6 @@ This project builds on [RadioLib](https://github.com/jgromes/RadioLib) and provi
 
 Supported LoRa boards:
 - SX126x series (SX1261, SX1262, SX1268)
-
----
-
 
 ---
 
@@ -34,8 +32,7 @@ A future extension is planned to add an MQTT-based console for viewing data when
 
 ### Transmission Flow
 
-```
-End Device             →          Receiver (Gateway/Server)
+End Device             ─────▶       Receiver (Gateway/Server)
 ───────────────                    ─────────────────────────────
 Send JoinReq          ───────────▶  Parse & verify
 Receive JoinAccept    ◀───────────  Send encrypted JoinAccept
@@ -121,9 +118,7 @@ You can configure retry attempts and timeouts to allow a device to automatically
 
 ### Packet Format
 
-```
 [SenderID (8 bytes)] + [Encrypted Payload] + [HMAC (8 bytes)]
-```
 
 ### Grouped Packet Storage
 
@@ -134,7 +129,6 @@ This reduces transmission frequency and improves energy efficiency.
 * Overflow is handled by creating new group files with prefixes
 
 ---
-
 
 ### Group Configuration Example
 
