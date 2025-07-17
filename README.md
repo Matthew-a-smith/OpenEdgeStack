@@ -12,10 +12,6 @@ Supported LoRa boards:
 - SX126x series (SX1261, SX1262, SX1268)
 
 ---
-
-
----
-
 ## Usage
 
 This library enables LoRa-style communication **without** requiring a LoRaWAN gateway or centralized network. Any LoRa-compatible device can act as a receiver.
