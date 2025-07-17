@@ -13,6 +13,9 @@ Supported LoRa boards:
 
 ---
 
+
+---
+
 ## Usage
 
 This library enables LoRa-style communication **without** requiring a LoRaWAN gateway or centralized network. Any LoRa-compatible device can act as a receiver.
@@ -32,7 +35,8 @@ A future extension is planned to add an MQTT-based console for viewing data when
 
 ### Transmission Flow
 
-End Device             ─────▶       Receiver (Gateway/Server)
+```
+End Device             →          Receiver (Gateway/Server)
 ───────────────                    ─────────────────────────────
 Send JoinReq          ───────────▶  Parse & verify
 Receive JoinAccept    ◀───────────  Send encrypted JoinAccept
@@ -118,7 +122,9 @@ You can configure retry attempts and timeouts to allow a device to automatically
 
 ### Packet Format
 
+```
 [SenderID (8 bytes)] + [Encrypted Payload] + [HMAC (8 bytes)]
+```
 
 ### Grouped Packet Storage
 
@@ -129,6 +135,7 @@ This reduces transmission frequency and improves energy efficiency.
 * Overflow is handled by creating new group files with prefixes
 
 ---
+
 
 ### Group Configuration Example
 
