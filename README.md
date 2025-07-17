@@ -179,7 +179,7 @@ You can also send messages immediately (without grouping), and they’ll still b
 ---
 ## Wiki
 
-See [https://github.com/Matthew-a-smith/OpenEdgeStack.wiki.git](https://github.com/Matthew-a-smith/OpenEdgeStack.wiki.git)
+See [Wiki](https://github.com/Matthew-a-smith/OpenEdgeStack/wiki)
 
 ---
 ## API
