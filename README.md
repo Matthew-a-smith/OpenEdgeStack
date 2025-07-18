@@ -87,7 +87,7 @@ This reduces transmission frequency and improves energy efficiency.
 * Groups can be up to **255 bytes**
 * Overflow is handled by creating new group files with prefixes
 
-check out [**transmitterGroup**](examples/transmitterGroup/transmitterGroup.ino) from example for more info on it.
+check out [**transmitterGroup**](examples/transmitterGroup/transmitterGroup.ino) from examples for more info on it.
  
 ---
 ## Normal messages
@@ -98,7 +98,7 @@ Their is also a poll send as well that acts a delay for sending.
 ---
 ## Quick Links 
 
-- 📖 [**Wiki**](https://github.com/Matthew-a-smith/OpenEdgeStack.wiki.git) – usage documentation  
+- 📖 [**Wiki**](https://github.com/Matthew-a-smith/OpenEdgeStack/wiki) – usage documentation  
 - ❓ [**Examples**](examples)  
 - 📘 [**API Reference**](API.md) 
 
