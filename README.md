@@ -48,8 +48,41 @@ This allows for generic access to shared radio methods such as:
 
   - startReceive() 
 
-### Session Management on the Gateway
+### Key Management
 
+🔐 **Important** The Examples does **not** include default keys. Each device must be provisioned with unique cryptographic keys. 🔐
+
+You have two options for securely generating keys:
+
+### Option 1: Use the Provided Python Script
+
+Run the provided `generate_keys.py` to create unique and secure device credentials:
+
+This will output keys in C-style arrays ready to paste into your Arduino sketch.
+
+Just change the GatewayEui into the devEUi for the selected Gateway.
+```bash
+python generate_keys.py
+```
+### Per GateWay
+```
+uint8_t devEUI[8] = { /* your DevEUI */ };
+uint8_t appKey[16] = { /* your AppKey */ };
+const uint8_t hmacKey[16] = { /* your HMAC key */ };
+```
+## Per EndDevice
+```
+uint8_t devEUI[8] = { /* your DevEUI */ };
+uint8_t appKey[16] = { /* your AppKey */ };
+uint8_t appEUI[8] = { /* your AppEUI */ };
+const uint8_t hmacKey[16] = { /* your HMAC key */ };
+```
+### Option 2: Use The Things Network (TTN)
+You can also use The Things Network to generate LoRaWAN-compatible credentials and manually copy them into your device configuration.
+
+---
+
+### Session Management on the Gateway
 Multiple end devices (sensors, nodes, etc.) can connect to a single gateway typically up to 8 or more depending on available memory.
 
 Each device must send a valid JoinRequest() using its unique 8-byte DevEUI.
@@ -63,24 +96,17 @@ Upon acceptance, the gateway derives and stores session keys (AppSKey, NwkSKey) 
   - Flash: If you choose to persist sessions across reboots.
 
 ---
-
 ### Packet Format
-
 ```
 [SenderID (8 bytes)] + [Nonce (16 bytes)] + [Encrypted Payload] + [HMAC (8 bytes)]
 ```
 Key Notes:
-
   -  No padding is applied.
-
   -  AES-CTR encryption allows variable-length payloads.
-
   -  The nonce is 16 bytes: first 8 bytes are the sender's DevEUI, next 8 are random (per packet).
-
   -  HMAC-SHA256 is computed over [SenderID + Nonce + Encrypted Payload], then truncated to 8 bytes.
 
 ### Grouped Packet Storage
-
 Packets can be grouped into bins and stored in memory or on disk, then transmitted later as a single encrypted blob.
 This reduces transmission frequency and improves energy efficiency.
 
