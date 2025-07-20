@@ -39,29 +39,27 @@
 #define LORA_BUSY   13
 #define LORA_DIO1   14
 
-Module module(LORA_CS, LORA_DIO1, LORA_RST, LORA_BUSY);
-SX1262 radioModule(&module);
+Module module(LORA_CS, LORA_DIO1, LORA_RST, LORA_BUSY); // Pin configuration
+SX1262 radioModule(&module); // Create SX1262 instance
 
-PhysicalLayer* lora = &radioModule;
+PhysicalLayer* lora = &radioModule; // Set global radio pointer
 
-float frequency_plan = 915.0;
+float frequency_plan = 915.0; // Frequency (in MHz)
 
 
 // ───── Runtime Globals ────────────────────────────────
 
 uint8_t devEUI[8] = {
-  0xC5, 0x80, 0x98, 0x92, 0x31, 0x35, 0x00, 0x00
-}; // Device EUI (64-bit)
+  /* your DevEUI */
+};  // Device EUI (64-bit)
 
 uint8_t appKey[16] = {
-  0x2A, 0xC3, 0x76, 0x13, 0xE4, 0x44, 0x26, 0x50,
-  0x2B, 0x8D, 0x7E, 0xEE, 0xAB, 0xA9, 0x57, 0xCD
+  /* your Appkey */
 }; // App root key (AES-128)
 
 const uint8_t hmacKey[16] = {
-  0xAA, 0xBB, 0xCC, 0xDD, 0x11, 0x22, 0x33, 0x44,
-  0x55, 0x66, 0x77, 0x88, 0x99, 0x00, 0xDE, 0xAD
-}; // Shared 16-byte static HMAC key
+  /* your hmackey */
+}; // Shared 16-byte static HMAC keyy
 
 
 // ───── Interrupt ──────────────────────────────────────
@@ -69,8 +67,6 @@ const uint8_t hmacKey[16] = {
 volatile bool receivedFlag = false;
 volatile bool transmissonFlag = false;
 
-// Interupt flag to avoid replay issues with joins
-unsigned long lastJoinResponseTime = 0;
 
 void setFlags() {
   if (!transmissonFlag) {
@@ -85,6 +81,10 @@ void setup() {
     Serial.println("[ERROR] SPIFFS Mount Failed");
     while (true);  // prevent further operation
   }
+
+  // Start preferences for sessions  
+  preferences.begin("lora", false);
+
   Serial.begin(115200);
   delay(100);
 
@@ -113,28 +113,7 @@ void setup() {
 
 }
 
-void printHexChars(const uint8_t* data, size_t len, const char* label) {
-  Serial.print(label);
-  for (size_t i = 0; i < len; i++) {
-    if (data[i] < 0x10) Serial.print('0');
-    Serial.print(data[i], HEX);
-  }
-  Serial.println();
-}
-
-String idToString(uint8_t* id, size_t len) {
-  String out = "";
-  for (int i = 0; i < len; i++) {
-    if (id[i] < 0x10) out += "0";
-    out += String(id[i], HEX);
-  }
-  return out;
-}
-
 void loop() {
-  // Static variable to track the last time we sent a JoinAccept response
-  // Used to prevent responding too frequently (i.e., debounce)
-  static unsigned long lastJoinResponseTime = 0;
 
   // Wait until the LoRa module signals a packet has been received
   if (!receivedFlag) return;
@@ -164,50 +143,51 @@ void loop() {
   if (length == 22) {  
       // Handle the join request and update last response time
       handleJoinIfNeeded(buffer, length);
-      lastJoinResponseTime = millis();
+      
   } else {
+
+      Serial.println("==== [RX PACKET] ====");
+      Serial.printf("Total length: %d bytes\n", length);
+       printHex(buffer, length, "[RAW] Data: ");
     // ─────────────────────────────────────────────────────────────
     // Handle Regular Encrypted Payload Packets
     // Format: [8-byte SrcID][Payload][8-byte HMAC]
     // ─────────────────────────────────────────────────────────────
 
-    uint8_t* srcID = buffer;                 // First 8 bytes = device ID
-    uint8_t* payload = buffer + 8;           // Encrypted payload starts after ID
-    uint8_t* receivedHMAC = buffer + length - 8;  // Last 8 bytes = HMAC
-    size_t payloadLength = length - 16;      // Total minus SrcID and HMAC
+    // ───── Updated Offsets ─────
+    uint8_t* srcID = buffer;           // 0–7
+    uint8_t* nonce = buffer + 8;       // 8–23 (new!)
+    uint8_t* payload = buffer + 24;    // 24–(end - 8)
+    uint8_t* receivedHMAC = buffer + length - 8;
 
-    // Convert device ID to string to look up session
-    String srcIDString = idToString(srcID, 8);
+    size_t payloadLength = length - 8 /*HMAC*/ - 8 /*srcID*/ - 16 /*nonce*/;
 
-    // Attempt to retrieve stored session keys for this device
+    String srcIDString = idToHexString(srcID);
+
     SessionInfo session;
     SessionStatus status = verifySession(srcIDString, session);
     if (status != SESSION_OK) {
       Serial.println("[ERROR] Session not found");
       return;
     }
-
-    // Copy keys to temporary buffers for local use
+  
     uint8_t localAppSKey[16], localNwkSKey[16];
     memcpy(localAppSKey, session.appSKey, 16);
+
     memcpy(localNwkSKey, session.nwkSKey, 16);
 
-    // Debug print the packet segments
-    printHexChars(srcID, 8, "[INFO] Source ID: ");
-    printHexChars(payload, payloadLength, "[INFO] Payload: ");
-    printHexChars(receivedHMAC, 8, "[INFO] Received HMAC: ");
+    printHex(payload, payloadLength, "[INFO] Payload: ");
+    printHex(receivedHMAC, 8, "[INFO] Received HMAC: ");
 
-    // Validate HMAC against full packet contents
-    if (verifyHmac(buffer, length, receivedHMAC) != SESSION_OK) {
-      Serial.println("[WARN] HMAC MISMATCH!");
+    SessionStatus Hmac = verifyHmac(buffer, length, receivedHMAC);
+    if (Hmac != SESSION_OK) {
+    Serial.println("[WARN] HMAC MISMATCH!");
       return;
     }
 
-    Serial.println("[OK] HMAC verified.");
-
     // Decrypt the payload using the AppSKey
     uint8_t decrypted[payloadLength];
-    decryptPayloadWithKey(localAppSKey, payload, payloadLength, decrypted);
+    decryptPayloadWithKey(localAppSKey, nonce, payload, payloadLength, decrypted);
 
     // Optional Send ack back
     sendDataAck(srcIDString, srcID);
@@ -236,7 +216,10 @@ void loop() {
 
       case TYPE_BYTES:
         // Print raw bytes in hexadecimal
-        printHexChars(data, dataLength, "[DECRYPTED] Bytes: ");
+        printHex(data, dataLength, "[DECRYPTED] Bytes: ");
+        Serial.print("HEX | ");
+        for (size_t i = 0; i < dataLength; i++) Serial.printf("0x%02X ", data[i]);
+        Serial.println();
         break;
 
       case TYPE_FLOATS:  {
@@ -259,4 +242,3 @@ void loop() {
   // Always return to RX mode to wait for the next packet
   lora->startReceive();
 }
-
