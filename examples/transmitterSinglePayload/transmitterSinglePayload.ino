@@ -7,13 +7,17 @@
   Notes:
   - Data is encrypted using the AppSKey before transmission.
   - The transmitted packet format is:
-      [SenderID (8 bytes)] + [Encrypted Payload] + [HMAC (8 bytes)]
-  - Compatible with other SX126x family modules.
+      [SenderID (8 bytes)] + [Nonce (16 bytes)] + [Encrypted Payload] + [HMAC (8 bytes)]
+      
+  Requirements:
+  - RadioLib library.
+  - LoRa module: SX126x (tested with Heltec V3).
+
+  Optional: 
+  - SPIFFS mounted for session persistence.
 */
 
-#include <EndDevice.h>
-#include <LoraWANLite.h>
-#include <Sessions.h>
+#include <OpenEdgeStack.h>
 
 // SENDER
 #include <RadioLib.h>
@@ -21,8 +25,6 @@
 #include <FS.h>
 #include <SPIFFS.h>
 #include <map>
-
-
 
 // LoRa SX1262 pins for Heltec V3
 #define LORA_CS     8
@@ -34,32 +36,28 @@
 #define LED_PIN    6 // Change as needed
 
 
+Module module(LORA_CS, LORA_DIO1, LORA_RST, LORA_BUSY); // Pin configuration
+SX1262 radioModule(&module); // Create SX1262 instance
 
-Module module(LORA_CS, LORA_DIO1, LORA_RST, LORA_BUSY);
-SX1262 radioModule(&module);
+PhysicalLayer* lora = &radioModule; // Set global radio pointer
 
-PhysicalLayer* lora = &radioModule;
-
-float frequency_plan = 915.0;
+float frequency_plan = 915.0; // Frequency (in MHz)
 
 uint8_t devEUI[8] = {
-  0x4F, 0x65, 0x75, 0xC5, 0xF0, 0x31, 0x00, 0x00
+  /* your DevEUI */
 };  // Device EUI (64-bit)
 
 uint8_t appEUI[8] = {
-  0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80
+  /* your AppEUI */
 }; // Application EUI (64-bit)
 
 uint8_t appKey[16] = {
-  0x2A, 0xC3, 0x76, 0x13, 0xE4, 0x44, 0x26, 0x50,
-  0x2B, 0x8D, 0x7E, 0xEE, 0xAB, 0xA9, 0x57, 0xCD
+  /* your Appkey */
 }; // App root key (AES-128)
 
 const uint8_t hmacKey[16] = {
-  0xAA, 0xBB, 0xCC, 0xDD, 0x11, 0x22, 0x33, 0x44,
-  0x55, 0x66, 0x77, 0x88, 0x99, 0x00, 0xDE, 0xAD
+  /* your hmackey */
 }; // Shared 16-byte static HMAC key
-
 
 // -------------------- State Flags -----------------------
 
@@ -93,6 +91,14 @@ void setup() {
     Serial.println("[ERROR] SPIFFS Mount Failed");
     while (true);  // prevent further operation
   }
+
+  // Start preferences for sessions  
+  preferences.begin("lora", false);
+
+  // set pins for buttons to prevent sending at start
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+  lastButtonState = digitalRead(BUTTON_PIN);
+
   Serial.begin(115200);
   delay(100);
 
