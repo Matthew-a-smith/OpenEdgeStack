@@ -21,7 +21,6 @@
 #include <OpenEdgeStack.h>
 
 #include <RadioLib.h>
-#include <Wire.h>
 #include <FS.h>
 #include <SPIFFS.h>
 
