@@ -11,13 +11,14 @@
     and send group files in sequence using a button press.
 
   Packet Format:
-    [SenderID (8 bytes)] + [Encrypted Group Data] + [HMAC (8 bytes)]
+    [SenderID (8 bytes)] + [Nonce (16 bytes)] + [Encrypted Payload] + [HMAC (8 bytes)]
 
   Notes:
   - Data is encrypted using the AppSKey before transmission.
   - Files are stored in SPIFFS and follow a consistent naming scheme.
   - This approach avoids full LoRaWAN overhead while preserving security.
   - Ideal for applications requiring chunked or batched transmissions.
+  - Use with the full reciver example successfully send acks back.
 
   Supported:
   - All SX126x LoRa modules.
@@ -32,8 +33,6 @@
 #include <SPIFFS.h>
 #include <map>
 
-
-
 // LoRa SX1262 pins for Heltec V3
 #define LORA_CS     8
 #define LORA_RST    12
@@ -42,34 +41,28 @@
 
 #define BUTTON_PIN 0  // Change as needed
 
-Module module(LORA_CS, LORA_DIO1, LORA_RST, LORA_BUSY);
-SX1262 radioModule(&module);
+Module module(LORA_CS, LORA_DIO1, LORA_RST, LORA_BUSY); // Pin configuration
+SX1262 radioModule(&module); // Create SX1262 instance
 
-PhysicalLayer* lora = &radioModule;
+PhysicalLayer* lora = &radioModule; // Set global radio pointer
 
-float frequency_plan = 915.0;
+float frequency_plan = 915.0; // Frequency (in MHz)
 
 uint8_t devEUI[8] = {
-  0x4F, 0x65, 0x75, 0xC5, 0xF0, 0x31, 0x00, 0x00
+  /* your DevEUI */
 };  // Device EUI (64-bit)
 
 uint8_t appEUI[8] = {
-  0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80
+  /* your AppEUI */
 }; // Application EUI (64-bit)
 
 uint8_t appKey[16] = {
-  0x2A, 0xC3, 0x76, 0x13, 0xE4, 0x44, 0x26, 0x50,
-  0x2B, 0x8D, 0x7E, 0xEE, 0xAB, 0xA9, 0x57, 0xCD
+  /* your Appkey */
 }; // App root key (AES-128)
 
 const uint8_t hmacKey[16] = {
-  0xAA, 0xBB, 0xCC, 0xDD, 0x11, 0x22, 0x33, 0x44,
-  0x55, 0x66, 0x77, 0x88, 0x99, 0x00, 0xDE, 0xAD
+  /* your hmackey */
 }; // Shared 16-byte static HMAC key
-
-uint8_t gatewayEUI[8] = {
-  0xC5, 0x80, 0x98, 0x92, 0x31, 0x35, 0x00, 0x00
-}; // Gateway EUI (64-bit)
 
 
 /*
@@ -100,6 +93,10 @@ const char* Group4 = "Grp4";
 // Declared globally to be accessible across all functions.
 String globalReply = "";
 
+// Tracks the current and previous button states for edge detection.
+int lastButtonState;
+int buttonState = 0;  // variable for reading the pushbutton status
+
 // Flags used by interrupt handlers and other logic to track received messages
 // and outgoing transmissions. Required when using the receiver with an end device.
 volatile bool receivedFlag = false;
@@ -111,30 +108,30 @@ void setFlags() {
   }
 }
 
-//void flushSession() {
-//  // Manually brute-force delete /GrpX_Y.bin files
-//  const char* groupPrefixes[] = { "Grp1", "Grp2", "Grp3", "Grp4" };
-//  const int maxSuffix = 500;  // Arbitrary upper limit
-//
-//  for (int i = 0; i < 4; i++) {
-//    const char* prefix = groupPrefixes[i];
-//    for (int suffix = 0; suffix < maxSuffix; suffix++) {
-//      char filename[32];
-//      snprintf(filename, sizeof(filename), "/%s_%d.bin", prefix, suffix);
-//
-//      if (SPIFFS.exists(filename)) {
-//        if (SPIFFS.remove(filename)) {
-//          Serial.printf("[CLEANUP] Removed %s\n", filename);
-//        } else {
-//          Serial.printf("[ERROR] Failed to remove %s\n", filename);
-//        }
-//      } else {
-//        // Once we miss one in a group, assume the rest are gone too
-//        break;
-//      }
-//    }
-//  }
-//}
+void flushSession() {
+  // Manually brute-force delete /GrpX_Y.bin files
+  const char* groupPrefixes[] = { "Grp1", "Grp2", "Grp3", "Grp4" };
+  const int maxSuffix = 500;  // Arbitrary upper limit
+
+  for (int i = 0; i < 4; i++) {
+    const char* prefix = groupPrefixes[i];
+    for (int suffix = 0; suffix < maxSuffix; suffix++) {
+      char filename[32];
+      snprintf(filename, sizeof(filename), "/%s_%d.bin", prefix, suffix);
+
+      if (SPIFFS.exists(filename)) {
+        if (SPIFFS.remove(filename)) {
+          Serial.printf("[CLEANUP] Removed %s\n", filename);
+        } else {
+          Serial.printf("[ERROR] Failed to remove %s\n", filename);
+        }
+      } else {
+        // Once we miss one in a group, assume the rest are gone too
+        break;
+      }
+    }
+  }
+}
 
 void setup() {
  // Mount SPIFFS to persist sessions across reboots
@@ -142,8 +139,17 @@ void setup() {
     Serial.println("[ERROR] SPIFFS Mount Failed");
     while (true);  // prevent further operation
   }
+   // Start preferences for sessions  
+  preferences.begin("lora", false);
+
+  // set pins for buttons to prevent sending at start
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+  lastButtonState = digitalRead(BUTTON_PIN);
+  
   Serial.begin(115200);
   delay(100);
+
+  flushSession();
 
   // Register the chosen radio module globally
   setRadioModule(&radioModule);  
@@ -175,10 +181,6 @@ void setup() {
 }
 
 // -------------------- State Flags -----------------------
-
-// Tracks the current and previous button states for edge detection.
-int lastButtonState;
-int buttonState = 0;  // variable for reading the pushbutton status
 
 // Counter to prevent repeated data collection inside of loop.
 int collectedCount = 0;
@@ -226,50 +228,50 @@ void loop() {
     Stores 57 raw bytes to /Grp1_0.bin as the raw payload.
     1 byte type + 57 raw bytes = 58 byte payload size
     58 bytes + 2 byte length = 60 byte file size
-     60 bytes → padded to 64 bytes
      
-      - 8 bytes sender ID
-      - 64 bytes encrypted payload
-      - 8 bytes HMAC
-
-    8 + 64 + 8 = 80 bytes total
+    - 8 bytes sender ID
+    - 16 bytes nonce
+    - 58 bytes encrypted payload
+    - 8 bytes HMAC
+  
+    Total size = 8 + 16 + 58 + 8 = 90 bytes
     */
     String groupOne = "this is a test sentence up to and over 16 bytes in length";
     storePacket((const uint8_t*)groupOne.c_str(), groupOne.length(), TYPE_TEXT, Group1);
 
     /*
-     Group 2
-     Stores 5 single bytes to /Grp2_0.bin
-     1 byte type + 5 raw bytes = 6 bytes payload size
-     6 bytes + 2 byte length = 8 byte file size
-     8 bytes → padded to 16 bytes 
+      Group 2
+      Stores 5 single bytes to /Grp2_0.bin
+      1 byte type + 5 raw bytes = 6 bytes payload size
+      6 bytes + 2 byte length = 8 byte file size
 
-       - 8 bytes sender ID
-       - 16 bytes encrypted payload
-       - 8 bytes HMAC
-     8 + 16 + * = 32 bytes total
+        - 8 bytes sender ID
+        - 6 bytes encrypted payload
+        - 8 bytes HMAC
+        - 16 bytes nonce
+      8 + 6 + 8 + 16 = 38 bytes total
     */
     uint8_t groupTwo[] = { 0x10, 0xF0, 0xAF, 0x08, 0xAE };
     storePacket(groupTwo, sizeof(groupTwo), TYPE_BYTES, Group2);
 
       /*
-     Group 3
-     Stores 23 individual words into /Grp3_X.bin files.
-     Each word is stored as a separate entry, where each entry adds:
-       - 2 bytes for the length header (uint16_t)
-       - 1 byte for the type
-       - N bytes for the word
+      Group 3
+      Stores 23 individual words into /Grp3_X.bin files.
+      Each word is stored as a separate entry, where each entry adds:
+        - 2 bytes for the length header (uint16_t)
+        - 1 byte for the type
+        - N bytes for the word
 
-     So, each word takes up (2 + 1 + N) bytes in the raw file.
+      So, each word takes up (2 + 1 + N) bytes in the raw file.
 
-     Group file size limit is 80 bytes, so once the limit is exceeded,
-     storage rolls over to a second file.
+      Group file size limit is 80 bytes, so once the limit is exceeded,
+      storage rolls over to a second file.
 
-     Note:
-     - The last word "together" is not stored, as it would overflow the 80-byte group file limit.
-     - Parsed payload includes only:
-         [1 byte type][data bytes] per entry
-         → So actual payload sent is smaller than file size.
+      Note:
+      - The last word "together" is not stored, as it would overflow the 80-byte group file limit.
+      - Parsed payload includes only:
+          [1 byte type][data bytes] per entry
+          → So actual payload sent is smaller than file size.
     */
     const char* groupThreeWords[] = {
       "this","test","sentence","is","up","to","and","over","80","bytes",
@@ -281,23 +283,22 @@ void loop() {
     }
 
     /*
-     Group 4
-     Stores 9 individual 4 byte floats into /Grp4_X.bin files.
-     
-     1 byte type + 4 byte float = 5 bytes payload size
-     5 byte length + 2 byte length = 7 byte entry
-     7 bytes * 9 bytes entrys = 63 byte file size
+      Group 4
+      Stores 9 individual 4 byte floats into /Grp4_X.bin files.
 
-     5 payload bytes * 9 entries = 45 bytes raw payload size before encyption
+      1 byte type + 4 byte float = 5 bytes payload size
+      5 bytes + 2 byte length = 7 byte entry
+      7 bytes * 9 entries = 63 byte file size
 
-     45 bytes → padded to 48 bytes 
+      5 payload bytes * 9 entries = 45 bytes raw payload size before encryption
 
-       - 8 bytes sender ID
-       - 48 bytes encrypted payload
-       - 8 bytes HMAC
-     8 + 48 + 8 = 64 bytes total
+        - 8 bytes sender ID
+        - 45 bytes encrypted payload
+        - 8 bytes HMAC
+        - 16 bytes nonce
+      8 + 45 + 8 + 16 = 69 bytes total
+    */
 
-     */
     float groupFour[9];
     uint8_t groupFourBytes[sizeof(groupFour)];
 
