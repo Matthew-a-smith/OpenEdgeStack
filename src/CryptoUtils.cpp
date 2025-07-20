@@ -1,5 +1,5 @@
 #include <CryptoUtils.h>
-#include <LoraWANLite.h>
+#include "Gateway.h"
 #include <Sessions.h>
 
 #include <Arduino.h>
@@ -90,6 +90,20 @@ void aes128_decrypt_block(const uint8_t* key, const uint8_t* input, uint8_t* out
   mbedtls_aes_free(&ctx);
 }
 
+void aes128_encrypt_ctr(const uint8_t* key, const uint8_t* nonce, const uint8_t* input, size_t length, uint8_t* output) {
+  mbedtls_aes_context ctx;
+  mbedtls_aes_init(&ctx);
+  mbedtls_aes_setkey_enc(&ctx, key, 128);
+
+  uint8_t stream_block[16];
+  size_t nc_off = 0;
+  uint8_t nonce_counter[16];
+  memcpy(nonce_counter, nonce, 16); // nonce should be unique per packet
+
+  mbedtls_aes_crypt_ctr(&ctx, length, &nc_off, nonce_counter, stream_block, input, output);
+  mbedtls_aes_free(&ctx);
+}
+
 // ────── Session Encryption ──────
 
 // Encrypts or decrypts an entire SessionInfo struct (32 bytes total) using two AES blocks.
@@ -111,41 +125,32 @@ void decryptSession(const uint8_t* in, SessionInfo& session) {
 
 // ────── Encrypted Payload Packet Layout ──────
 
-// ────── Encrypted Payload Packet Layout ─────────────────
-// Offset | Size          | Field           | Description
-// -------|---------------|------------------|------------------------------
-// 0      | 8             | Sender ID        | Sender devEUI in byte format
-// 8      | N (padded)    | AES Encrypted    | Payload encrypted with appSKey
-// 8+N    | 8             | HMAC             | First 8 bytes of HMAC-SHA256
+// ────── Encrypted Payload Packet Layout ───────────────
+// Offset | Size         | Field           | Description
+// -------|--------------|------------------|------------------------------
+// 0      | 8            | Sender ID        | Sender devEUI (used for session lookup)
+// 8      | 16           | Nonce            | 8B Sender ID + 8B random counter
+// 24     | payloadLen   | Encrypted Payload| AES-128-CTR encrypted data (no padding)
+// 24+N   | 8            | HMAC             | First 8 bytes of HMAC-SHA256
 //
 // Notes:
-// - AES encryption uses 128-bit blocks; payload padded to nearest multiple of 16
-// - HMAC computed on: [Sender ID + Encrypted Payload]
-// - Final length returned via `finalLen`
-// - Function allocates memory for packet and returns pointer to final buffer
-
+// - AES-128-CTR mode used (no padding, stream cipher)
+// - Nonce format: [Sender ID (8B) | Random CTR (8B)]
+// - HMAC is computed over: [Sender ID + Nonce + Encrypted Payload]
+// - Final packet length = 8 (Sender) + 16 (Nonce) + payloadLen + 8 (HMAC)
+// - Caller must free returned buffer
+//
 // Inputs:
-//   - payloadData: raw message content to send (e.g. text or file chunk)
-//   - payloadLen: length of raw payload
-//   - session: SessionInfo struct holding appSKey
-//   - finalLen: reference that will be set to final packet length
-//   - Sender: 8-byte sender devEUI
+//   - payloadData: Raw data to encrypt
+//   - payloadLen: Length of payloadData
+//   - session: Contains appSKey
+//   - finalLen: Reference set to total packet length
+//   - Sender: 8-byte devEUI
 //
-// Outputs:
-//   - Returns full encrypted packet: [Sender ID][Encrypted Payload][HMAC (8B)]
-//   - HMAC is computed over [Sender ID + Encrypted Payload]
-//   - Encrypted payload is padded to nearest 16-byte block for AES
-//   - Caller must free the returned buffer manually
-//
-// Final layout:
-//   ┌────────────┬──────────────────────┬─────────────┐
-//   │ Sender ID  │ AES-Encrypted Payload│ Trunc. HMAC │
-//   │ (8 bytes)  │ 16*N bytes           │ (8 bytes)   │
-//   └────────────┴──────────────────────┴─────────────┘
-//
-// Used for:
-//   - Sending encrypted, signed data packets over LoRa
-//   - Ensures confidentiality + integrity
+// Output:
+//   - Returns full packet: [Sender ID][Nonce][Encrypted Payload][HMAC]
+//   - Ensures confidentiality (AES) and integrity/authenticity (HMAC)
+
 
 
 uint8_t* encryptAndPackage(
@@ -154,38 +159,41 @@ uint8_t* encryptAndPackage(
   size_t& finalLen,
   const uint8_t* Sender
 ) {
-
-  uint8_t appSKey[16], localNwkSKey[16];
+  uint8_t appSKey[16];
   memcpy(appSKey, session.appSKey, 16);
 
-  size_t encryptedLen = (payloadLen % 16 == 0) ? payloadLen : ((payloadLen / 16) + 1) * 16; 
+  // 1. Prepare nonce (CTR IV): use sender ID + a counter or random value
+  uint8_t nonce[16] = {0};
+  memcpy(nonce, Sender, 8);
+  uint64_t ctr = esp_random(); // ensure different for each packet
+  memcpy(nonce + 8, &ctr, 8);
 
-  uint8_t* paddedPayload = new uint8_t[encryptedLen]();
-  memcpy(paddedPayload, payloadData, payloadLen);
+  // 2. Encrypt with CTR
+  uint8_t* encryptedPayload = new uint8_t[payloadLen];
+  aes128_encrypt_ctr(appSKey, nonce, payloadData, payloadLen, encryptedPayload);
 
-  uint8_t* encryptedPayload = new uint8_t[encryptedLen];
-  for (size_t i = 0; i < encryptedLen; i += 16) {
-    aes128_encrypt_block(appSKey, paddedPayload + i, encryptedPayload + i);
-  }
-
-  size_t baseLen = 8 + encryptedLen; 
+  // 3. Build [Sender ID][Nonce][Encrypted Payload]
+  size_t baseLen = 8 + 16 + payloadLen;
   uint8_t* fullPayload = new uint8_t[baseLen];
   memcpy(fullPayload, Sender, 8);
-  memcpy(fullPayload + 8, encryptedPayload, encryptedLen);
+  memcpy(fullPayload + 8, nonce, 16);
+  memcpy(fullPayload + 24, encryptedPayload, payloadLen);
 
+  // 4. Compute HMAC over [Sender ID + Nonce + EncryptedPayload]
   uint8_t hmacResult[32];
   computeHMAC_SHA256(hmacKey, sizeof(hmacKey), fullPayload, baseLen, hmacResult);
 
+  // 5. Final packet = fullPayload + HMAC (truncated 8B)
   finalLen = baseLen + 8;
   uint8_t* finalPacket = new uint8_t[finalLen];
   memcpy(finalPacket, fullPayload, baseLen);
   memcpy(finalPacket + baseLen, hmacResult, 8);
 
-  delete[] paddedPayload;
   delete[] encryptedPayload;
   delete[] fullPayload;
   return finalPacket;
 }
+
 
 // Decrypts a full encrypted payload using AES-128 in ECB mode.
 // Inputs:
@@ -198,9 +206,8 @@ uint8_t* encryptAndPackage(
 // Caller must ensure `output` is allocated with at least `length` bytes.
 
 
-void decryptPayload(uint8_t* appSKey, uint8_t* payload, size_t length, uint8_t* output) {
-  for (size_t i = 0; i < length; i += 16) {
-    aes128_decrypt_block(appSKey, payload + i, output + i);
-  }
+void decryptPayload(uint8_t* appSKey, uint8_t* nonce, uint8_t* encryptedPayload, size_t length, uint8_t* output) {
+  aes128_encrypt_ctr(appSKey, nonce, encryptedPayload, length, output);
 }
+
 

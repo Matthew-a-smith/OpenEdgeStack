@@ -2,7 +2,7 @@
 #define END_DEVICE_H
 
 #include <Arduino.h>
-#include <LoraWANLite.h>
+#include "Gateway.h"
 
 extern String globalReply;
 
@@ -14,7 +14,7 @@ struct GroupConfig {
 
 // Must be defined by user sketch
 extern GroupConfig groupConfig;
-extern uint8_t gatewayEUI[8];
+
 // ─────────────────────────────────────────────
 // Function Declarations
 // ─────────────────────────────────────────────

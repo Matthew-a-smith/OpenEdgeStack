@@ -2,7 +2,7 @@
 #define SESSIONS_H
 
 #include <Arduino.h>
-#include <LoraWANLite.h>
+#include "Gateway.h"
 #include <Preferences.h>
 #include <map>
 
@@ -68,7 +68,6 @@ struct SessionInfo {
     uint8_t joinNonce[3];       ///< Join nonce from server
     uint8_t netID[3];           ///< Network ID
     uint8_t devNonce[2];        ///< Device join nonce
-    uint32_t sessionStart;      ///< Epoch time of session start
 };
 
 // ─────────────────────────────────────────────
@@ -77,7 +76,6 @@ struct SessionInfo {
 
 extern std::map<String, SessionInfo> sessionMap;
 extern Preferences preferences;
-extern int SESSION_TIMEOUT_SECONDS;
 
 enum SessionStatus {
     SESSION_OK,

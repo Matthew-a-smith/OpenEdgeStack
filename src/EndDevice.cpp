@@ -1,4 +1,4 @@
-#include "LoraWANLite.h"
+#include "Gateway.h"
 #include "EndDevice.h"
 #include "CryptoUtils.h"
 #include "Sessions.h"
@@ -20,8 +20,7 @@ String devEUIHex = idToHexString(devEUI);
 // 4      | 3    | JoinNonce   | Nonce from network for session key derivation
 // 7      | 3    | NetID       | Identifier of the LoRaWAN network
 // 10     | 2    | DevNonce    | Echo of our original devNonce (LE)
-// 12     | 4    | Unknown/MIC | Possibly reserved or message integrity code
-//
+
 
 bool handleJoinAccept(uint8_t* buffer, size_t len) {
   if (len != 16) {
@@ -47,10 +46,6 @@ bool handleJoinAccept(uint8_t* buffer, size_t len) {
   deriveSessionKey(nwkSKey, 0x01, appKey, joinNonce, netID, (uint8_t*)&devNonce);
 
   Serial.println("[JOIN] JoinAccept decrypted.");
-  Serial.print("[JOIN] Assigned DevAddr: 0x"); Serial.println(devAddr, HEX);
-  printHex(joinNonce, 3, "[JOIN] JoinNonce: ");
-  printHex(netID, 3, "[JOIN] NetID: ");
-  printHex((uint8_t*)&devNonce, 2, "[JOIN] DevNonce: "); 
   Serial.println("[JOIN] Session keys derived successfully.");
 
   SessionInfo session;
@@ -71,7 +66,7 @@ bool handleJoinAccept(uint8_t* buffer, size_t len) {
 // -------|------|-------------|------------------------------
 // 0      | 8    | devEUI      | Device unique identifier
 // 8      | 8    | appEUI      | Application identifier
-// 16     | 2    | devNonce    | Random nonce for this join request (little-endian)
+// 16     | 2    | devNonce    | Random nonce for the join request (little-endian)
 struct JoinRequest {
   uint8_t devEUI[8];
   uint8_t appEUI[8];
@@ -377,10 +372,20 @@ void pollLora(
     delay(preDelayMillis);
   }
 
-  // Retry sending
-    Serial.print("[INFO] Sending payload + HMAC... Attempt ");
-    sender(finalPacket, finalLen);
-  
+  transmissonFlag = true;
+  lora->standby();
+  delay(5);
+  int result = lora->transmit(finalPacket, finalLen);
+  delay(10);                      
+  int rxState = lora->startReceive();
+  transmissonFlag = false;    
+  if (result == RADIOLIB_ERR_NONE) {
+    Serial.println("[ACK] Sent successfully.");
+  } else {
+    Serial.println("[ACK] Failed to send");
+  }
+
+  delete[] finalPacket;
   delete[] packetData;
 }
 
@@ -417,28 +422,23 @@ void sendLora(const uint8_t* payloadData, size_t payloadLen, DataType dataType) 
 
   // Send
   sender(finalPacket, finalLen);
-
+  delete[] finalPacket;
   delete[] packetData;
 }
  
 
 void handlePacket(uint8_t* buffer, size_t length) {
-  
   Serial.println("==== [RX PACKET] ====");
-  Serial.printf("Total length: %d bytes\n", length);
-  printHex(buffer, length, "[RAW] Data: ");
 
-  uint8_t* srcID = buffer;
-  uint8_t* payload = buffer + 8;
+  // ───── Updated Offsets ─────
+  uint8_t* srcID = buffer;           // 0–7
+  uint8_t* nonce = buffer + 8;       // 8–23 (new!)
+  uint8_t* payload = buffer + 24;    // 24–(end - 8)
   uint8_t* receivedHMAC = buffer + length - 8;
-  size_t payloadLength = length - 8 - 8;
+
+  size_t payloadLength = length - 8 /*HMAC*/ - 8 /*srcID*/ - 16 /*nonce*/;
 
   String srcIDString = idToHexString(srcID);
-
-  if (payload == gatewayEUI) {
-    flushSessionFor(srcIDString);
-    printHex(payload, payloadLength, "[INFO] Payload bytes: ");
-  }
 
   SessionInfo session;
   SessionStatus status = verifySession(srcIDString, session);
@@ -447,24 +447,20 @@ void handlePacket(uint8_t* buffer, size_t length) {
     return;
   }
 
-  uint8_t appSKey[16], nwkSKey[16];
-  memcpy(appSKey, session.appSKey, 16);
-  memcpy(nwkSKey, session.nwkSKey, 16);
-
-  printHex(srcID, 8, "[INFO] srcID: ");
-  printHex(payload, payloadLength, "[INFO] Payload bytes: ");
-  printHex(receivedHMAC, 8, "[INFO] Received HMAC: ");
-
- SessionStatus Hmac = verifyHmac(buffer, length, receivedHMAC);
+  // ───── Update HMAC Verification to match full buffer ─────
+  SessionStatus Hmac = verifyHmac(buffer, length, receivedHMAC);
   if (Hmac != SESSION_OK) {
   Serial.println("[WARN] HMAC MISMATCH!");
     return;
   }
   Serial.println("[OK] HMAC verified.");
 
+  uint8_t appSKey[16];
+  memcpy(appSKey, session.appSKey, 16);
+  // ───── Use CTR Decryption with Nonce ─────
   uint8_t decryptedPayload[payloadLength];
-  decryptPayload(appSKey, payload, payloadLength, decryptedPayload);
-  
+  decryptPayload(appSKey, nonce, payload, payloadLength, decryptedPayload);
+
   printHex(decryptedPayload, payloadLength, "[INFO] Decrypted Payload: ");
   String decryptedMessage = "";
   for (size_t i = 0; i < payloadLength; i++) {
@@ -472,11 +468,10 @@ void handlePacket(uint8_t* buffer, size_t length) {
     decryptedMessage += (char)decryptedPayload[i];
   }
 
-  globalReply = decryptedMessage;  // ✅ FIXED this assignment
-
+  globalReply = decryptedMessage;
   Serial.println("[INFO] Message: " + globalReply);
-
 }
+
 
 // ────── LoRa Incoming Listener ───────────────────────────────
 void listenForIncoming() {

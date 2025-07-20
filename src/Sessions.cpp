@@ -1,10 +1,16 @@
 #include "CryptoUtils.h"
-#include "LoraWANLite.h"
+#include "Gateway.h"
 #include "Sessions.h"
 
 #include <Arduino.h>
+#include <WiFi.h>
+#include <RadioLib.h>
+#include "HT_SSD1306Wire.h"
+#include <PubSubClient.h>
+#include <ArduinoJson.h>
+#include "mbedtls/md.h"
+#include "mbedtls/aes.h"
 #include <Preferences.h>
-#include <map>
 
 
 
@@ -91,11 +97,11 @@ void saveSessionToNVS(const String& devEUI, SessionInfo session) {
 
 
 bool loadSessionFromNVS(const String& devEUI, SessionInfo& session) {
-  uint8_t encrypted[sizeof(SessionInfo)];
+  uint8_t encrypted[32];
   String key = devEUI.substring(0, 8);  // Truncate to 8 characters
   
   preferences.begin("lora", true);
-  if (preferences.getBytesLength(key.c_str()) != sizeof(SessionInfo)) {
+  if (preferences.getBytesLength(key.c_str()) != 32) {
     preferences.end();
     return false;
   }
@@ -104,6 +110,7 @@ bool loadSessionFromNVS(const String& devEUI, SessionInfo& session) {
   decryptSession(encrypted, session);
   return true;
 }
+
 
 
 void storeSessionFor(String devEUI, const SessionInfo& session) {
@@ -120,7 +127,7 @@ bool getSessionFor(String devEUI, SessionInfo& session) {
   }
 
   Serial.println("[INFO] Session not found in RAM, trying NVS...");
-  if (loadSessionFromNVS(devEUI.c_str(), session)) {
+  if (loadSessionFromNVS(devEUI, session)) {
     Serial.println("[INFO] Session loaded from NVS");
     sessionMap[devEUI] = session;  // cache in RAM
     return true;
