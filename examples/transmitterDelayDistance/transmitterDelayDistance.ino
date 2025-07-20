@@ -14,12 +14,11 @@
   - Data is encrypted using AppSKey before transmission.
   - The transmitted packet format is:
       [SenderID (8 bytes)] + [Encrypted Group Data] + [HMAC (8 bytes)]
+  - Best used with reciverSimple or remove the sendACK call from reciverFull for the best results.
   - Compatible with all SX126x family LoRa modules.
 */
 
-#include <EndDevice.h>
-#include <LoraWANLite.h>
-#include <Sessions.h>
+#include <OpenEdgeStack.h>
 
 #include <RadioLib.h>
 #include <Wire.h>
@@ -36,32 +35,41 @@
 #define TRIG_PIN 7
 #define ECHO_PIN 6
 
-float frequency_plan = 915.0;
-SX1262 lora = new Module(LORA_CS, LORA_DIO1, LORA_RST, LORA_BUSY);
+Module module(LORA_CS, LORA_DIO1, LORA_RST, LORA_BUSY); // Pin configuration
+SX1262 radioModule(&module); // Create SX1262 instance
+
+PhysicalLayer* lora = &radioModule; // Set global radio pointer
+
+float frequency_plan = 915.0; // Frequency (in MHz)
+
+// ───── Runtime Globals ────────────────────────────────
 
 uint8_t devEUI[8] = {
-  0x4F, 0x65, 0x75, 0xC5, 0xF0, 0x31, 0x00, 0x00
-};
+  /* your DevEUI */
+};  // Device EUI (64-bit)
 
 uint8_t appEUI[8] = {
-  0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80
-};
+  /* your AppEUI */
+}; // Application EUI (64-bit)
 
 uint8_t appKey[16] = {
-  0x2A, 0xC3, 0x76, 0x13, 0xE4, 0x44, 0x26, 0x50,
-  0x2B, 0x8D, 0x7E, 0xEE, 0xAB, 0xA9, 0x57, 0xCD
-};
+  /* your Appkey */
+}; // App root key (AES-128)
 
 const uint8_t hmacKey[16] = {
-  0xAA, 0xBB, 0xCC, 0xDD, 0x11, 0x22, 0x33, 0x44,
-  0x55, 0x66, 0x77, 0x88, 0x99, 0x00, 0xDE, 0xAD
-};
+  /* your hmackey */
+}; // Shared 16-byte static HMAC key
 
-String devAddr = String((uint64_t)ESP.getEfuseMac(), HEX);
 
-String globalReply = "";
+// ───── Interrupt ──────────────────────────────────────
+// Flags used by interrupt handlers and other logic to track received messages
 volatile bool receivedFlag = false;
 volatile bool transmissonFlag = false;
+
+
+// Tracks acknowledgment (ACK) responses between the end device and gateway.
+// Declared globally to be accessible across all functions.
+String globalReply = "";
 
 void setFlags() {
   if (!transmissonFlag) {
@@ -71,12 +79,15 @@ void setFlags() {
 
 void setup() {
  
+  // Initialize entropy for nonces, random devNonce etc.
   randomSeed(analogRead(0));
 
+  // Power external devices (e.g. sensors, radio modules)
   pinMode(Vext, OUTPUT);
-  digitalWrite(Vext, LOW);
+  digitalWrite(Vext, LOW);  // Enable Vext
   delay(100);
 
+  // Setup ultrasonic sensor pins
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
 
@@ -85,6 +96,10 @@ void setup() {
     Serial.println("[ERROR] SPIFFS Mount Failed");
     while (true);  // prevent further operation
   }
+
+  // Start preferences for sessions  
+  preferences.begin("lora", false);
+
   Serial.begin(115200);
   delay(100);
 
@@ -112,8 +127,8 @@ void setup() {
   Serial.println("[Setup] Setup complete.");
 
   // IMPORTANT: Send join request AfTER enabling receive mode
-  int maxRetries = 3 //Number of retries
-  int retryDelay = 3000 //Timeout per attempt in milliseconds
+  int maxRetries = 3; //Number of retries
+  int retryDelay = 3000; //Timeout per attempt in milliseconds
   sendJoinRequest(maxRetries, retryDelay);  // Wait for session handshake   
 }
 
@@ -123,33 +138,44 @@ float measureDistance() {
   digitalWrite(TRIG_PIN, HIGH);
   delayMicroseconds(10);
   digitalWrite(TRIG_PIN, LOW);
+
+  // Wait for echo response
   long duration = pulseIn(ECHO_PIN, HIGH, 30000);
+  
+  // Slow down distance checks directly here
+  delay(1000);  // <-- 1 second delay between each measurement
+
   return duration * 0.034 / 2.0;
-  delay(2000);
 }
 
 void loop() {
+  // Listen for incoming LoRa messages (flags will be set on RX)
   listenForIncoming();
 
+  // Read ultrasonic distance
   float distance = measureDistance();
+
+  // Trigger if object is farther than 20cm
   if (distance > 20.0) {
     Serial.println("\n--- Distance Triggered Send ---");
     Serial.println("[INFO] Distance: " + String(distance, 1) + " cm");
-    Serial.println("ID: " + devAddr);
-    Serial.println("Dist: " + String(distance, 1) + " cm");
 
+    // Pack float into byte array (for encrypted sending)
     uint8_t distanceBytes[4];
     memcpy(distanceBytes, &distance, sizeof(float));
- 
-    // This waits 5 seconds (5000 ms) before sending
+
+    // Send via LoRa using type `TYPE_FLOATS` and a 3-second timeout
     pollLora(distanceBytes, sizeof(distanceBytes), TYPE_FLOATS, 3000);
   } else {
-    Serial.println("ID: " + devAddr);
+    // Too close — no transmission
     Serial.println("Dist: " + String(distance, 1) + " cm");
     Serial.println("Too close (<20cm)");
   }
+
+  // Wait before next loop (reduce spam)
   delay(100);
 }
+
 
 
 

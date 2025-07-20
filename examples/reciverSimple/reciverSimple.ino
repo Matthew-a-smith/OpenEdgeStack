@@ -2,15 +2,21 @@
   OpenEdgeStack SX126x simple recive Example
 
   This examples recives and decrypts incomeing packets it also checks for new join
-  requests, that are 18 bytes in length and proccess them correctly.
+  requests, that are 22 bytes in length and proccess them correctly.
 
   Notes:
   - Data is Decrypted using appSKey.
   - Once recived it sends back out a ack flag to the sender
-  The Recived packet format is:
-      [SenderID (8 bytes)] + [Encrypted Group Data] + [HMAC (8 bytes)]
 
-  - Other SX126x family modules are supported.
+  The Recived packet format is:
+      [SenderID (8 bytes)] + [Nonce (16 bytes)] + [Encrypted Payload] + [HMAC (8 bytes)]
+
+  Requirements:
+  - RadioLib library.
+  - LoRa module: SX126x (tested with Heltec V3).
+
+  Optional: 
+  - SPIFFS mounted for session persistence.
 
 */
 
@@ -29,29 +35,27 @@
 #define LORA_BUSY   13
 #define LORA_DIO1   14
 
-Module module(LORA_CS, LORA_DIO1, LORA_RST, LORA_BUSY);
-SX1262 radioModule(&module);
+Module module(LORA_CS, LORA_DIO1, LORA_RST, LORA_BUSY); // Pin configuration
+SX1262 radioModule(&module); // Create SX1262 instance
 
-PhysicalLayer* lora = &radioModule;
+PhysicalLayer* lora = &radioModule; // Set global radio pointer
 
-float frequency_plan = 915.0;
+float frequency_plan = 915.0; // Frequency (in MHz)
 
 
 // ───── Runtime Globals ────────────────────────────────
 
 uint8_t devEUI[8] = {
-  0xC5, 0x80, 0x98, 0x92, 0x31, 0x35, 0x00, 0x00
-}; // Device EUI (64-bit)
+  /* your DevEUI */
+};  // Device EUI (64-bit)
 
 uint8_t appKey[16] = {
-  0x2A, 0xC3, 0x76, 0x13, 0xE4, 0x44, 0x26, 0x50,
-  0x2B, 0x8D, 0x7E, 0xEE, 0xAB, 0xA9, 0x57, 0xCD
+  /* your Appkey */
 }; // App root key (AES-128)
 
 const uint8_t hmacKey[16] = {
-  0xAA, 0xBB, 0xCC, 0xDD, 0x11, 0x22, 0x33, 0x44,
-  0x55, 0x66, 0x77, 0x88, 0x99, 0x00, 0xDE, 0xAD
-}; // Shared 16-byte static HMAC key
+  /* your hmackey */
+}; // Shared 16-byte static HMAC keyy
 
 
 // ───── Interrupt ──────────────────────────────────────
@@ -75,6 +79,10 @@ void setup() {
     Serial.println("[ERROR] SPIFFS Mount Failed");
     while (true);  // prevent further operation
   }
+
+  // Start preferences for sessions  
+  preferences.begin("lora", false);
+
   Serial.begin(115200);
   delay(100);
 
@@ -104,6 +112,7 @@ void setup() {
 }
 
 void loop() {
+  //Recive and handle incomeing packets
   Recive();  
   delay(5);
 }
