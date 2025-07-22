@@ -86,10 +86,5 @@ void sendDataAck(const String& srcID, uint8_t* SenderID);
 void Recive();
 
 
-void printBinaryBits(uint8_t* payload, size_t length);
-
-void decryptPayloadWithKey(uint8_t* appSKey, uint8_t* nonce, uint8_t* payload, size_t payloadLength, uint8_t* out);
-
-
 
 #endif // LORA_SESSION_H

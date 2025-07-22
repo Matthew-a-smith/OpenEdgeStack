@@ -68,7 +68,8 @@ struct JoinAccept {
 // - Store session info indexed by DevEUI
 // - Send back a 16-byte encrypted JoinAccept packet with session identifiers
 
- // Function Output: Derives and stores appSKey and nwkSKey in `SessionInfo`
+ 
+// Function Output: Derives and stores appSKey and nwkSKey in `SessionInfo`
 void handleJoinRequest(uint8_t* buffer, size_t len) {
   if (len != 22) {
     Serial.println("[JOIN] Invalid JoinRequest size");
@@ -129,8 +130,9 @@ void handleJoinRequest(uint8_t* buffer, size_t len) {
 
   // According to LoRaWAN spec, the JoinAccept message encryption is done by performing
   // an AES **decrypt** operation with the AppKey on the server/network side. 
-  // This means to use `aes128_decrypt_block()` to *encrypt* the JoinAccept payload before sending.
+  // This means we use `aes128_decrypt_block()` to *encrypt* the JoinAccept payload before sending.
   // Both sides use AES-ECB mode and the same key, so this approach works correctly
+  // for secure JoinAccept encryption and decryption.
 
   uint8_t encryptedPayload[16];
   aes128_decrypt_block(appKey, payload, encryptedPayload); 
@@ -202,86 +204,78 @@ void handleLoRaPacket(uint8_t* buffer, size_t length) {
   Serial.println("========== DECRYPTED DATA ==========");
   
   uint8_t decryptedPayload[payloadLength];
+
   decryptPayload(localAppSKey, nonce, payload, payloadLength, decryptedPayload);
   printHex(decryptedPayload, payloadLength, "[INFO] Decrypted Payload: ");
- 
- 
-  Serial.println("[INFO] Raw Binary:");
-  for (size_t i = 0; i < payloadLength; i++) {
-    for (int b = 7; b >= 0; b--) {
-      Serial.print((payload[i] >> b) & 0x01);
-    }
-    Serial.print(" ");
   
-    // Newline every 8 bytes (64 bits)
-    if ((i + 1) % 8 == 0) {
-      Serial.println();
-    }
-  }
-  // Final newline if payloadLength wasn't a multiple of 8
-  if (payloadLength % 8 != 0) {
-    Serial.println();
-  }
+    // Optional: print the raw payload in binary format
+    printBinaryBits(payload, payloadLength);
 
-  uint8_t dataType = decryptedPayload[0]; // First byte = type
-  uint8_t* data = decryptedPayload + 1;   // Actual payload starts here
-  size_t dataLength = payloadLength - 1;
+    uint8_t* ptr = decryptedPayload;          // Pointer to current position in decrypted buffer
+    size_t index = 0;                  // Record index for logging
 
-  Serial.printf("[INFO] Data Type: 0x%02X\n", dataType);
-
-  switch (dataType) {
-    case TYPE_TEXT: {
-    String message = "";
-    for (size_t i = 0; i < dataLength; i++) {
-      char c = (char)data[i];
-      if (c == 0x01) {
-        message += ' ';
-      } else if (isPrintable(c)) {
-        message += c;
-      }
-      // else skip unprintable characters
-    }
-    Serial.println("[DECRYPTED] Text: " + message);
-    break;
-  }
-
-
-    case TYPE_BYTES: {
-      printHex(data, dataLength, "[DECRYPTED] Bytes: ");
-      Serial.print("HEX | ");
-      for (size_t i = 0; i < dataLength; i++) Serial.printf("0x%02X ", data[i]);
-      Serial.println();
-      break;
-    }
-
-
-    case TYPE_FLOATS: {
-      if (dataLength % sizeof(float) != 0) {
-        Serial.printf("[WARN] Float payload not aligned (%d bytes)\n", dataLength);
+    while (ptr < decryptedPayload + payloadLength) {
+      uint8_t dataType = *ptr++;       // Read current data type and advance pointer
+      uint8_t* dataStart = ptr;        // Start of data for this type
+      size_t dataLength = 0;           // Length of data for this type
+    
+      // Advance until next type or end of payload, counting data length
+      while (ptr < decryptedPayload + payloadLength &&
+             *ptr != TYPE_TEXT &&
+             *ptr != TYPE_BYTES &&
+             *ptr != TYPE_FLOATS) {
+        ptr++;
+        dataLength++;
       }
     
-      size_t floatCount = dataLength / sizeof(float);
-      for (size_t i = 0; i < floatCount; i++) {
-        float val;
-        memcpy(&val, &data[i * sizeof(float)], sizeof(float));
-        Serial.printf("[DECRYPTED] Float[%d]: %.2f\n", i, val);
+      Serial.printf("[INFO] Type: 0x%02X | Length: %zu\n", dataType, dataLength);
+      // Decode printable text; replace 0x01 with space
+      switch (dataType) {
+        case TYPE_TEXT: {
+          String msg = "";
+          for (size_t i = 0; i < dataLength; i++) {
+            char c = (char)dataStart[i];
+            if (c == 0x01) msg += ' ';       // Replace 0x01 with space
+            else if (isPrintable(c)) msg += c;
+          }
+          Serial.println("[DECRYPTED] Text: " + msg);
+          break;
+        }
+      
+        // Print raw bytes in hexadecimal
+        case TYPE_BYTES: {
+          Serial.print("[DECRYPTED] Bytes: ");
+          for (size_t i = 0; i < dataLength; i++) {
+            Serial.printf("0x%02X ", dataStart[i]);
+          }
+          Serial.println();
+          break;
+        }
+      
+        // Interpret data as floats
+        case TYPE_FLOATS: {
+          int i = 0;
+          for (size_t pos = 0; pos + sizeof(float) <= dataLength; pos += sizeof(float)) {
+            float val;
+            memcpy(&val, dataStart + pos, sizeof(float));
+            Serial.printf("[DECRYPTED] Float[%d]: %.2f\n", i++, val);
+          }
+          size_t leftover = dataLength % sizeof(float);
+          if (leftover) {
+            Serial.printf("[INFO] %zu leftover bytes not forming full float\n", leftover);
+          }
+          break;
+        }
+      
+        default:
+          Serial.printf("[WARN] Unknown type: 0x%02X\n", dataType);
+          break;
       }
-    
-      size_t leftover = dataLength % sizeof(float);
-      if (leftover) {
-        Serial.printf("[INFO] Ignoring %d leftover bytes\n", leftover);
-      }
-      break;
+      index++;
     }
-
-    default:
-      Serial.printf("[WARN] Unknown data type: 0x%02X\n", dataType);
-      break;
-  }
-
+  
   Serial.println("====================\n");
-
-  }
+}
 
 
 void handleJoinIfNeeded(uint8_t* buffer, size_t len) {
@@ -338,24 +332,7 @@ void decryptPayloadWithKey(uint8_t* appSKey, uint8_t* nonce, uint8_t* payload, s
   decryptPayload(appSKey, nonce, payload, payloadLength, out);
 }
 
-void printBinaryBits(uint8_t* payload, size_t length) {
-  Serial.println("[INFO] Raw Binary:");
-  for (size_t i = 0; i < length; i++) {
-    for (int b = 7; b >= 0; b--) {
-      Serial.print((payload[i] >> b) & 0x01);
-    }
-    Serial.print(" ");
-  
-    // Newline every 8 bytes (64 bits)
-    if ((i + 1) % 8 == 0) {
-      Serial.println();
-    }
-  }
-  // Final newline if payloadLength wasn't a multiple of 8
-  if (length % 8 != 0) {
-    Serial.println();
-  }
-}
+
 
   
 

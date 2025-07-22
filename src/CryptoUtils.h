@@ -73,5 +73,7 @@ void decryptSession(const uint8_t* in, SessionInfo& session);
 
 void aes128_encrypt_ctr(const uint8_t* key, const uint8_t* nonce, const uint8_t* input, size_t length, uint8_t* output);
 
+void decryptPayloadWithKey(uint8_t* appSKey, uint8_t* nonce, uint8_t* payload, size_t payloadLength, uint8_t* out);
+
 #endif // CRYPTO_UTILS_H
 

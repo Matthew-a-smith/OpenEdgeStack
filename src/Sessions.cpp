@@ -61,6 +61,24 @@ void printHex(const uint8_t* data, size_t len, const char* label) {
   Serial.println();
 }
 
+void printBinaryBits(uint8_t* payload, size_t length) {
+  Serial.println("[INFO] Raw Binary:");
+  for (size_t i = 0; i < length; i++) {
+    for (int b = 7; b >= 0; b--) {
+      Serial.print((payload[i] >> b) & 0x01);
+    }
+    Serial.print(" ");
+  
+    // Newline every 8 bytes (64 bits)
+    if ((i + 1) % 8 == 0) {
+      Serial.println();
+    }
+  }
+  // Final newline if payloadLength wasn't a multiple of 8
+  if (length % 8 != 0) {
+    Serial.println();
+  }
+}
 // Session key derivation as per LoRaWAN 1.0 spec
 void deriveSessionKey(uint8_t* outKey, uint8_t keyType, const uint8_t* appKey,
                       const uint8_t* joinNonce, const uint8_t* netID, const uint8_t* devNonce) {

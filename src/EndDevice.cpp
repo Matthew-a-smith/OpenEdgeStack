@@ -27,7 +27,8 @@ bool handleJoinAccept(uint8_t* buffer, size_t len) {
     Serial.println("[ERROR] Invalid JoinAccept length.");
     return false;
   }
-
+  
+  // AES-ECB decrypt JoinAccept using AppKey (same as encrypt in ECB)
   uint8_t decrypted[16];
   aes128_encrypt_block(appKey, buffer, decrypted); // ✅
 
@@ -73,6 +74,15 @@ struct JoinRequest {
   uint16_t devNonce;
 };
 
+uint16_t generateDevNonce() {
+    uint16_t nonce = 0;
+    for (int i = 0; i < 4; i++) {
+        nonce ^= (esp_random() & 0xFFFF);
+        delay(1);
+    }
+    return nonce;
+}
+
 void sendJoinRequest(int maxRetries, unsigned long retryDelay) {
   SessionInfo session;
   SessionStatus status = verifySession(devEUIHex, session);
@@ -86,7 +96,7 @@ void sendJoinRequest(int maxRetries, unsigned long retryDelay) {
   for (int attempt = 1; attempt <= maxRetries; attempt++) {
     Serial.printf("[JOIN] Attempt %d of %d\n", attempt, maxRetries);
 
-    uint16_t devNonce = esp_random() & 0xFFFF;
+    uint16_t devNonce = generateDevNonce();
 
     JoinRequest joinReq;
     memcpy(joinReq.devEUI, devEUI, 8);
@@ -160,15 +170,15 @@ void storePacket(const uint8_t* data, size_t length, DataType dataType, const ch
         Serial.printf("[ERROR] Invalid group index: %d for path %s\n", groupIndex, pathBase);
         return;
     }
-
+    const size_t entryOverhead = sizeof(uint16_t) + 1;
+    if ((entryOverhead + length) > groupConfig.maxFileSize) {
+        size_t allowedLength = groupConfig.maxFileSize - entryOverhead;
+        Serial.printf("[WARN] Entry too large (%d bytes). Truncating payload to %d bytes.\n", (int)(entryOverhead + length), (int)allowedLength);
+        length = allowedLength;
+    }
     int suffix = groupSuffixes[groupIndex];
 
-    if (suffix >= groupConfig.groupPrefixLimit) {
-        Serial.printf("[ERROR] No more file slots for %s (limit %d reached)\n", pathBase, groupConfig.groupPrefixLimit);
-        return;
-    }
-
-    char path[32];
+        char path[32];
     snprintf(path, sizeof(path), "/%s_%d.bin", pathBase, suffix);
 
     size_t currentFileSize = 0;
@@ -188,6 +198,11 @@ void storePacket(const uint8_t* data, size_t length, DataType dataType, const ch
         snprintf(path, sizeof(path), "/%s_%d.bin", pathBase, suffix);
         Serial.printf("[INFO] Switched to new group file: %s\n", path);
     }
+
+    if (length > groupConfig.maxFileSize) {
+        Serial.printf("[WARN] Payload size %d exceeds limit (%d bytes). Truncating.\n", (int)length, groupConfig.maxFileSize);
+        return;
+      }
 
     File file = SPIFFS.open(path, FILE_APPEND);
     if (!file) {
@@ -209,8 +224,6 @@ void storePacket(const uint8_t* data, size_t length, DataType dataType, const ch
 // -------|---------------|-------------|------------------------------
 // 1      | fileSize      | Raw Data    | All group file bytes from SPIFFS
 //
-// Total = 1 + size of group_X.bin
-//
 // Notes:
 // - Data is encrypted with `appSKey` before sending
 // - Transmitted buffer is: [SenderID (8)] + [Encrypted Group] + [HMAC (8)]
@@ -226,21 +239,19 @@ bool sendGroupFileAtPath(const char* path, bool finalSend = true) {
 
   std::vector<uint8_t> packetData;
 
-  while (file.available() >= 3) {  // At least 2 bytes for length and 1 for type
-    uint16_t entryLen;
-    if (file.readBytes((char*)&entryLen, 2) != 2) break;
+  while (file.available() >= 3) {
+  uint16_t entryLen;
+  if (file.readBytes((char*)&entryLen, 2) != 2) break;
 
-    if (entryLen < 1) break;  // Invalid length
-    uint8_t typeByte;
-    if (!file.read(&typeByte, 1)) break;
+  if (entryLen < 1) break;  // Invalid length
 
-    size_t dataLen = entryLen - 1;
-    std::vector<uint8_t> entry(dataLen);
-    if (file.read(entry.data(), dataLen) != dataLen) break;
+  std::vector<uint8_t> entry(entryLen);
+  if (file.read(entry.data(), entryLen) != entryLen) break;
 
-    packetData.push_back(typeByte);
-    packetData.insert(packetData.end(), entry.begin(), entry.end());
-  }
+  // Append full original record: [1-byte type][N-byte payload]
+  packetData.insert(packetData.end(), entry.begin(), entry.end());
+}
+
 
   file.close();
 

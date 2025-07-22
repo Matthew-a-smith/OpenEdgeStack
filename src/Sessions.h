@@ -175,4 +175,6 @@ void flushSessionFor(const String& devEUI);
  */
 void flushAllSessions();
 
+void printBinaryBits(uint8_t* payload, size_t length);
+
 #endif // SESSIONS_H
