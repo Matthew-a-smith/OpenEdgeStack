@@ -48,21 +48,46 @@ PhysicalLayer* lora = &radioModule; // Set global radio pointer
 
 float frequency_plan = 915.0; // Frequency (in MHz)
 
-uint8_t devEUI[8] = {
-  /* your DevEUI */
-};  // Device EUI (64-bit)
+/*
+  -------------------------------------------------------------------
+  IMPORTANT: Uploading a sketch without valid keys will result in a compile error.
+  
+  The key arrays below have been intentionally commented out to prevent the
+  use of default or weak keys. This measure ensures that users must provide
+  unique and secure keys before compiling.
 
-uint8_t appEUI[8] = {
-  /* your AppEUI */
-}; // Application EUI (64-bit)
+  Each device must be provisioned with its own cryptographic keys to
+  securely communicate over LoRa.
 
-uint8_t appKey[16] = {
-  /* your Appkey */
-}; // App root key (AES-128)
+  You have two options for generating these keys:
 
-const uint8_t hmacKey[16] = {
-  /* your hmackey */
-}; // Shared 16-byte static HMAC key
+  1) Use the provided Python script `generate_keys.py` located in the 'extras' folder.
+     This script outputs keys as C-style arrays ready to be copied here.
+     Rember the app and hmacKey get shared between devices.
+     Use gatewayEUI in the python script as the secnd devEUI or vice versa.
+
+  2) Use The Things Network (TTN) to generate compatible device credentials,
+     then manually paste those values into the arrays below.
+  -------------------------------------------------------------------
+*/
+
+// ───── Runtime Globals ────────────────────────────────
+
+// uint8_t devEUI[8] = {
+//   /* your devEUI */
+// };  // Device EUI (64-bit)
+
+// uint8_t appEUI[8] = {
+//   /* your AppEUI */
+// }; // Application EUI (64-bit)
+
+// uint8_t appKey[16] = {
+//   /* your appKEY */  
+// }; // AppKey (AES-128)
+
+// const uint8_t hmacKey[16] = {
+//    /* yourHMAC key */
+// }; // Shared HMAC key (16 bytes)
 
 
 /*
@@ -197,6 +222,7 @@ bool awaitingAckForGroup2 = false;
 bool awaitingAckForGroup3 = false;
 bool awaitingAckForGroup4 = false;
 
+// function to clean up after successfull send with ack
 void handleFile(const char* pathBase) {
   for (int suffix = 0; suffix < 9; suffix++) {
     char path1[32];
@@ -225,22 +251,22 @@ void loop() {
   if (collectedCount < 1) {
     /*
     Group1 
-    Stores 57 raw bytes to /Grp1_0.bin as the raw payload.
-    1 byte type + 57 raw bytes = 58 byte payload size
-    58 bytes + 2 byte length = 60 byte file size
+    Stores 48 raw bytes to /Grp1_0.bin as the raw payload.
+    1 byte type + 48 raw bytes = 49 byte payload size
+    49 bytes + 2 byte length = 51 byte file size
      
     - 8 bytes sender ID
     - 16 bytes nonce
-    - 58 bytes encrypted payload
+    - 49 bytes encrypted payload
     - 8 bytes HMAC
   
-    Total size = 8 + 16 + 58 + 8 = 90 bytes
+    Total size = 8 + 16 + 49 + 8 = 81 bytes
     */
-    String groupOne = "this is a test sentence up to and over 16 bytes in length";
+    String groupOne = "this is a test sentence under 64 bytes in length";
     storePacket((const uint8_t*)groupOne.c_str(), groupOne.length(), TYPE_TEXT, Group1);
 
     /*
-      Group 2
+    Group 2
       Stores 5 single bytes to /Grp2_0.bin
       1 byte type + 5 raw bytes = 6 bytes payload size
       6 bytes + 2 byte length = 8 byte file size
@@ -249,66 +275,59 @@ void loop() {
         - 6 bytes encrypted payload
         - 8 bytes HMAC
         - 16 bytes nonce
-      8 + 6 + 8 + 16 = 38 bytes total
+        - 1 Byte type
+
+      The byte type gets added twice once in the file and a second time when sending.
+      8 + 6 + 8 + 16 + 1 = 38 bytes total
     */
     uint8_t groupTwo[] = { 0x10, 0xF0, 0xAF, 0x08, 0xAE };
     storePacket(groupTwo, sizeof(groupTwo), TYPE_BYTES, Group2);
 
       /*
-      Group 3
-      Stores 23 individual words into /Grp3_X.bin files.
-      Each word is stored as a separate entry, where each entry adds:
-        - 2 bytes for the length header (uint16_t)
-        - 1 byte for the type
-        - N bytes for the word
+     Group 3 
+      Trys to Stores 68 raw bytes to /Grp3_0.bin as the raw payload.
+      68 bytes exceeds limit (64 bytes)
+      64 byte file size - 2 byte length = 62 byte payload size
+      62 byte payload size - 1 byte type = 61 byte file size 
+      
+        - 8 bytes sender ID
+        - 62 bytes encrypted payload
+        - 8 bytes HMAC
+        - 16 bytes nonce
 
-      So, each word takes up (2 + 1 + N) bytes in the raw file.
-
-      Group file size limit is 80 bytes, so once the limit is exceeded,
-      storage rolls over to a second file.
-
-      Note:
-      - The last word "together" is not stored, as it would overflow the 80-byte group file limit.
-      - Parsed payload includes only:
-          [1 byte type][data bytes] per entry
-          → So actual payload sent is smaller than file size.
+      8 + 62 + 8 + 16 = 94 bytes total
     */
-    const char* groupThreeWords[] = {
-      "this","test","sentence","is","up","to","and","over","80","bytes",
-      "in","length","it","should","be","broken","into","two","different","groups","and",
-      "sent", "togehter"
-    };
-    for (int i = 0; i < 23; i++) {
-      storePacket((const uint8_t*)groupThreeWords[i], strlen(groupThreeWords[i]), TYPE_TEXT, Group3);
-    }
+    String groupThree = "this is a test sentence over 64 bytes in length not all will send";
+    storePacket((const uint8_t*)groupThree.c_str(), groupThree.length(), TYPE_TEXT, Group3);
+    
 
     /*
-      Group 4
-      Stores 9 individual 4 byte floats into /Grp4_X.bin files.
-
+    Group 4
+      Stores 18 individual 4 byte floats into /Grp4_X.bin files.
+      over flows at the 9th entry createing prefix group
+      
       1 byte type + 4 byte float = 5 bytes payload size
       5 bytes + 2 byte length = 7 byte entry
       7 bytes * 9 entries = 63 byte file size
-
+ 
       5 payload bytes * 9 entries = 45 bytes raw payload size before encryption
 
         - 8 bytes sender ID
         - 45 bytes encrypted payload
         - 8 bytes HMAC
         - 16 bytes nonce
-      8 + 45 + 8 + 16 = 69 bytes total
-    */
-
-    float groupFour[9];
-    uint8_t groupFourBytes[sizeof(groupFour)];
-
-    for (int i = 0; i < 9; i++) {
-      float val = ((float)random(-10000, 10000)) / 100.0;
-      groupFour[i] = val;
-      memcpy(&groupFourBytes[i * 4], &val, sizeof(float));
-    }
+      8 + 45 + 8 + 16 = 77 bytes sent
+      77 bytes sent * 2 = 154 total bytes 
+    */    
+    for (int i = 0; i < 18; i++) {
+    float val = ((float)random(-10000, 10000)) / 100.0;
+    
+    uint8_t groupFourBytes[4];
+    memcpy(groupFourBytes, &val, sizeof(float));
 
     storePacket(groupFourBytes, sizeof(groupFourBytes), TYPE_FLOATS, Group4);
+}
+  
     collectedCount++;
     delay(500);
   }

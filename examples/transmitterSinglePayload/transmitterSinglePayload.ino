@@ -43,21 +43,46 @@ PhysicalLayer* lora = &radioModule; // Set global radio pointer
 
 float frequency_plan = 915.0; // Frequency (in MHz)
 
-uint8_t devEUI[8] = {
-  /* your DevEUI */
-};  // Device EUI (64-bit)
+/*
+  -------------------------------------------------------------------
+  IMPORTANT: Uploading a sketch without valid keys will result in a compile error.
+  
+  The key arrays below have been intentionally commented out to prevent the
+  use of default or weak keys. This measure ensures that users must provide
+  unique and secure keys before compiling.
 
-uint8_t appEUI[8] = {
-  /* your AppEUI */
-}; // Application EUI (64-bit)
+  Each device must be provisioned with its own cryptographic keys to
+  securely communicate over LoRa.
 
-uint8_t appKey[16] = {
-  /* your Appkey */
-}; // App root key (AES-128)
+  You have two options for generating these keys:
 
-const uint8_t hmacKey[16] = {
-  /* your hmackey */
-}; // Shared 16-byte static HMAC key
+  1) Use the provided Python script `generate_keys.py` located in the 'extras' folder.
+     This script outputs keys as C-style arrays ready to be copied here.
+     Rember the app and hmacKey get shared between devices.
+     Use gatewayEUI in the python script as the secnd devEUI or vice versa.
+
+  2) Use The Things Network (TTN) to generate compatible device credentials,
+     then manually paste those values into the arrays below.
+  -------------------------------------------------------------------
+*/
+
+// ───── Runtime Globals ────────────────────────────────
+
+// uint8_t devEUI[8] = {
+//   /* your devEUI */
+// };  // Device EUI (64-bit)
+
+// uint8_t appEUI[8] = {
+//   /* your AppEUI */
+// }; // Application EUI (64-bit)
+
+// uint8_t appKey[16] = {
+//   /* your appKEY */  
+// }; // AppKey (AES-128)
+
+// const uint8_t hmacKey[16] = {
+//    /* yourHMAC key */
+// }; // Shared HMAC key (16 bytes)
 
 // -------------------- State Flags -----------------------
 

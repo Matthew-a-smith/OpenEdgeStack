@@ -15,7 +15,7 @@
   including encryption handling, HMAC verification, and dynamic session handling.
 
   Packet format:
-    [SenderID (8 bytes)] + [Encrypted Payload] + [HMAC (8 bytes)]
+    [SenderID (8 bytes)] + [Nonce (16 bytes)] + [Encrypted Payload] + [HMAC (8 bytes)]
 
   Notes:
   - Uses AES-128 for payload decryption.
@@ -49,17 +49,41 @@ float frequency_plan = 915.0; // Frequency (in MHz)
 
 // ───── Runtime Globals ────────────────────────────────
 
-uint8_t devEUI[8] = {
-  /* your DevEUI */
-};  // Device EUI (64-bit)
+/*
+  -------------------------------------------------------------------
+  IMPORTANT: Uploading a sketch without valid keys will result in a compile error.
+  
+  The key arrays below have been intentionally commented out to prevent the
+  use of default or weak keys. This measure ensures that users must provide
+  unique and secure keys before compiling.
 
-uint8_t appKey[16] = {
-  /* your Appkey */
-}; // App root key (AES-128)
+  Each device must be provisioned with its own cryptographic keys to
+  securely communicate over LoRa.
 
-const uint8_t hmacKey[16] = {
-  /* your hmackey */
-}; // Shared 16-byte static HMAC keyy
+  You have two options for generating these keys:
+
+  1) Use the provided Python script `generate_keys.py` located in the 'extras' folder.
+     This script outputs keys as C-style arrays ready to be copied here.
+     Rember the app and hmacKey get shared between devices.
+     Use gatewayEUI in the python script as the secnd devEUI or vice versa.
+
+  2) Use The Things Network (TTN) to generate compatible device credentials,
+     then manually paste those values into the arrays below.
+  -------------------------------------------------------------------
+*/
+
+// uint8_t devEUI[8] = {
+//   /* your devEUI */
+// };  // Device EUI (64-bit)
+
+// uint8_t appKey[16] = {
+//   /* your appKEY */  
+// }; // AppKey (AES-128)
+
+// const uint8_t hmacKey[16] = {
+//    /* yourHMAC key */
+// }; // Shared HMAC key (16 bytes)
+
 
 
 // ───── Interrupt ──────────────────────────────────────
@@ -141,7 +165,7 @@ void loop() {
   // Handle JoinRequest packets (22 bytes)
   // ─────────────────────────────────────────────────────────────
   if (length == 22) {  
-      // Handle the join request and update last response time
+      // Handle the join request if needed
       handleJoinIfNeeded(buffer, length);
       
   } else {
@@ -149,6 +173,7 @@ void loop() {
       Serial.println("==== [RX PACKET] ====");
       Serial.printf("Total length: %d bytes\n", length);
        printHex(buffer, length, "[RAW] Data: ");
+       
     // ─────────────────────────────────────────────────────────────
     // Handle Regular Encrypted Payload Packets
     // Format: [8-byte SrcID][Payload][8-byte HMAC]
@@ -195,50 +220,69 @@ void loop() {
     // Optional: print the raw payload in binary format
     printBinaryBits(payload, payloadLength);
 
-    // First byte of decrypted payload = data type
-    uint8_t dataType = decrypted[0];
-    uint8_t* data = decrypted + 1;
-    size_t dataLength = payloadLength - 1;
+    uint8_t* ptr = decrypted;          // Pointer to current position in decrypted buffer
+    size_t index = 0;                  // Record index for logging
 
-    // ───── Handle different types of decrypted payloads ─────
-    switch (dataType) {
-      case TYPE_TEXT: {
-        // Decode printable text; replace 0x01 with space
-        String msg;
-        for (size_t i = 0; i < dataLength; i++) {
-          char c = (char)data[i];
-          if (c == 0x01) msg += ' ';
-          else if (isPrintable(c)) msg += c;
-        }
-        Serial.println("[DECRYPTED] Text: " + msg);
-        break;
+    while (ptr < decrypted + payloadLength) {
+      uint8_t dataType = *ptr++;       // Read current data type and advance pointer
+      uint8_t* dataStart = ptr;        // Start of data for this type
+      size_t dataLength = 0;           // Length of data for this type
+    
+      // Advance until next type or end of payload, counting data length
+      while (ptr < decrypted + payloadLength &&
+             *ptr != TYPE_TEXT &&
+             *ptr != TYPE_BYTES &&
+             *ptr != TYPE_FLOATS) {
+        ptr++;
+        dataLength++;
       }
-
-      case TYPE_BYTES:
+    
+      Serial.printf("[INFO] Type: 0x%02X | Length: %zu\n", dataType, dataLength);
+      // Decode printable text; replace 0x01 with space
+      switch (dataType) {
+        case TYPE_TEXT: {
+          String msg = "";
+          for (size_t i = 0; i < dataLength; i++) {
+            char c = (char)dataStart[i];
+            if (c == 0x01) msg += ' ';       // Replace 0x01 with space
+            else if (isPrintable(c)) msg += c;
+          }
+          Serial.println("[DECRYPTED] Text: " + msg);
+          break;
+        }
+      
         // Print raw bytes in hexadecimal
-        printHex(data, dataLength, "[DECRYPTED] Bytes: ");
-        Serial.print("HEX | ");
-        for (size_t i = 0; i < dataLength; i++) Serial.printf("0x%02X ", data[i]);
-        Serial.println();
-        break;
-
-      case TYPE_FLOATS:  {
-        // Interpret data as floats
-        size_t floatCount = dataLength / sizeof(float);
-        for (size_t i = 0; i < floatCount; i++) {
-          float val;
-          memcpy(&val, &data[i * sizeof(float)], sizeof(float));
-          Serial.printf("[DECRYPTED] Float[%d]: %.2f\n", i, val);
+        case TYPE_BYTES: {
+          Serial.print("[DECRYPTED] Bytes: ");
+          for (size_t i = 0; i < dataLength; i++) {
+            Serial.printf("0x%02X ", dataStart[i]);
+          }
+          Serial.println();
+          break;
         }
-        break;
+      
+        // Interpret data as floats
+        case TYPE_FLOATS: {
+          int i = 0;
+          for (size_t pos = 0; pos + sizeof(float) <= dataLength; pos += sizeof(float)) {
+            float val;
+            memcpy(&val, dataStart + pos, sizeof(float));
+            Serial.printf("[DECRYPTED] Float[%d]: %.2f\n", i++, val);
+          }
+          size_t leftover = dataLength % sizeof(float);
+          if (leftover) {
+            Serial.printf("[INFO] %zu leftover bytes not forming full float\n", leftover);
+          }
+          break;
+        }
+      
+        default:
+          Serial.printf("[WARN] Unknown type: 0x%02X\n", dataType);
+          break;
       }
-
-      default:
-        // Unknown or unsupported data type
-        Serial.printf("[WARN] Unknown data type: 0x%02X\n", dataType);
+      index++;
     }
   }
-
-  // Always return to RX mode to wait for the next packet
+  // Return to RX mode to wait for next packet
   lora->startReceive();
 }
