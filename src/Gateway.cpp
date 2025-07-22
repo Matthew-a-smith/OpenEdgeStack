@@ -68,8 +68,7 @@ struct JoinAccept {
 // - Store session info indexed by DevEUI
 // - Send back a 16-byte encrypted JoinAccept packet with session identifiers
 
- 
-// Function Output: Derives and stores appSKey and nwkSKey in `SessionInfo`
+ // Function Output: Derives and stores appSKey and nwkSKey in `SessionInfo`
 void handleJoinRequest(uint8_t* buffer, size_t len) {
   if (len != 22) {
     Serial.println("[JOIN] Invalid JoinRequest size");
@@ -90,7 +89,11 @@ void handleJoinRequest(uint8_t* buffer, size_t len) {
   memcpy(devNonce, buffer + 16, 2);
 
   uint8_t joinNonce[3];
-  for (int i = 0; i < 3; i++) joinNonce[i] = esp_random() & 0xFF;
+  uint32_t rnd = esp_random();
+  joinNonce[0] = rnd & 0xFF;
+  joinNonce[1] = (rnd >> 8) & 0xFF;
+  joinNonce[2] = (rnd >> 16) & 0xFF;
+
 
   uint32_t devAddr = esp_random();  // assign a device address
   uint8_t netID[3] = { 0x01, 0x23, 0x45 };  // your network ID
@@ -122,7 +125,13 @@ void handleJoinRequest(uint8_t* buffer, size_t len) {
   String devEUIHex = idToHexString(devEUI);
   storeSessionFor(devEUIHex, session);
 
-  // Encrypt payload
+  // NOTE on AES encrypt/decrypt usage for JoinAccept:
+
+  // According to LoRaWAN spec, the JoinAccept message encryption is done by performing
+  // an AES **decrypt** operation with the AppKey on the server/network side. 
+  // This means to use `aes128_decrypt_block()` to *encrypt* the JoinAccept payload before sending.
+  // Both sides use AES-ECB mode and the same key, so this approach works correctly
+
   uint8_t encryptedPayload[16];
   aes128_decrypt_block(appKey, payload, encryptedPayload); 
 
