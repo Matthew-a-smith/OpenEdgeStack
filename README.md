@@ -1,20 +1,15 @@
-# OpenEdgeStack
+# OpenEdgeStack [![arduino-library-badge](https://www.ardu-badge.com/badge/OpenEdgeStack.svg?)](https://www.ardu-badge.com/OpenEdgeStack)
 
 OpenEdgeStack is an open-source encryption library for Arduino that enables secure communication over LoRa radios without the need for LoRaWAN gateways or backend infrastructure.
 
 ---
-
 ## Compatible Hardware
-
 This project builds on [RadioLib](https://github.com/jgromes/RadioLib) and provides an encryption layer for embedded edge devices.
 
 Supported LoRa boards:
 - SX126x series (SX1261, SX1262, SX1268)
-
 ---
-
 ## Usage
-
 This library enables LoRa-style communication **without** requiring a LoRaWAN gateway or centralized network. Any LoRa-compatible device can act as a receiver.
 
 Key Features:
@@ -29,9 +24,7 @@ Currently, this library provides the encrypted LoRa communication layer.
 A future extension is planned to add an MQTT-based console for viewing data when a network connection is available.
 
 ---
-
-### Transmission Flow
-
+## Transmission Flow
 ```
 End Device             →          Receiver (Gateway/Server)
 ───────────────                    ─────────────────────────────
@@ -48,40 +41,25 @@ This allows for generic access to shared radio methods such as:
 
   - startReceive() 
 
-### Key Management
+## Key Management
 
 🔐 **Important** The Examples does **not** include default keys. Each device must be provisioned with unique cryptographic keys. 🔐
 
-You have two options for securely generating keys:
+**You have two options for securely generating keys:**
 
-### Option 1: Use the Provided Python Script
+  ### Option 1: Use the Provided Python Script
+  - Run the provided `generate_keys.py` inside of the extra folder to create unique and secure device credentials:
+  - This will output keys in C-style arrays ready to paste into your Arduino sketch.
+  - Just change the GatewayEui into the devEUi for the selected Gateway.
+    
+    ```bash
+    python generate_keys.py
+    ```
 
-Run the provided `generate_keys.py` to create unique and secure device credentials:
-
-This will output keys in C-style arrays ready to paste into your Arduino sketch.
-
-Just change the GatewayEui into the devEUi for the selected Gateway.
-```bash
-python generate_keys.py
-```
-### Per GateWay
-```
-uint8_t devEUI[8] = { /* your DevEUI */ };
-uint8_t appKey[16] = { /* your AppKey */ };
-const uint8_t hmacKey[16] = { /* your HMAC key */ };
-```
-## Per EndDevice
-```
-uint8_t devEUI[8] = { /* your DevEUI */ };
-uint8_t appKey[16] = { /* your AppKey */ };
-uint8_t appEUI[8] = { /* your AppEUI */ };
-const uint8_t hmacKey[16] = { /* your HMAC key */ };
-```
-### Option 2: Use The Things Network (TTN)
-You can also use The Things Network to generate LoRaWAN-compatible credentials and manually copy them into your device configuration.
+  ### Option 2: Use The Things Network (TTN)
+  - You can also use The Things Network to generate LoRaWAN-compatible credentials and manually copy them into your device configuration.
 
 ---
-
 ### Session Management on the Gateway
 Multiple end devices (sensors, nodes, etc.) can connect to a single gateway typically up to 8 or more depending on available memory.
 
@@ -116,19 +94,19 @@ This reduces transmission frequency and improves energy efficiency.
 check out [**transmitterGroup**](examples/transmitterGroup/transmitterGroup.ino) from examples for more info on it.
  
 ---
-## Normal messages
+### Normal messages
 You can also send messages immediately (without grouping), and they’ll still be encrypted.
 
 Their is also a poll send as well that acts a delay for sending.
 
 ---
-## Quick Links 
+### Quick Links 
 
 - 📖 [**Wiki**](https://github.com/Matthew-a-smith/OpenEdgeStack/wiki) – usage documentation  
 - ❓ [**Examples**](examples)  
 - 📘 [**API Reference**](API.md) 
 
-## FAQ
+### FAQ
 
 **1) What libraries are required?**
 This library builds on top of [RadioLib](https://github.com/jgromes/RadioLib). It handles encryption and addressing only — radio handling is left to the underlying library.
@@ -156,6 +134,26 @@ This is a lightweight “LoRaWAN Lite” model. You don’t need to rely on an o
 
 **4) Which frequencies can I use?**
 Refer to [this LoRaWAN frequency table](https://www.thethingsnetwork.org/wiki/LoRaWAN/Frequencies/By-Country) and your hardware datasheet. Always comply with your country’s legal duty cycle limits.
+
+### What about LoRaWAN?
+This isn't LoRaWAN, but it mirrors the same goals
+ - Secure sessions
+ - Authentication
+ - MIC protection
+ - AES key derivation
+   
+### Why Not Just Use LoRaWAN?
+ - I don’t want gateways
+ - I don’t want to rely on TTN or any backend
+ - I want full control, custom join, and encryption
+ - I also want offline operation, even peer-to-peer
+   
+### So Why Does It Look Similar?
+Because those patterns exist for a reason. LoRaWAN’s join procedure, MIC format, AES usage those aren’t random. They’re good practices.
+recreating many core ideas, but in my own way, with
+- Lighter code
+- Fully offline capability
+- Flexibility for embedded and constrained devices
 
 ---
 ## License
