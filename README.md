@@ -26,7 +26,7 @@ A future extension is planned to add an MQTT-based console for viewing data when
 ---
 ## Change log (Version 1.1.2)
     Mar 13 2026
-```
+
  - Fixed join request reliability to improve OTAA encryption stability.
 
 - Added a new polymorphic LoRa send feature for large payload transmission.
