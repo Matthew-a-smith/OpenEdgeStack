@@ -92,23 +92,21 @@ float frequency_plan = 915.0; // Frequency (in MHz)
 
 // ───── Runtime Globals ────────────────────────────────
 
-uint8_t devEUI[8] = {
-  0xE5, 0x27, 0x4D, 0x58, 0x8F, 0x23, 0xD5, 0x52
-}; // devEUI (64-bit)
+// uint8_t devEUI[8] = {
+//   /* your devEUI */
+// };  // Device EUI (64-bit)
 
-uint8_t appEUI[8] = {
-  0x3A, 0x4B, 0x97, 0xFC, 0xFF, 0x19, 0x80, 0xD0
-}; // appEUI (64-bit)
+// uint8_t appEUI[8] = {
+//   /* your AppEUI */
+// }; // Application EUI (64-bit)
 
-uint8_t appKey[16] = {
-  0xB6, 0x89, 0x9F, 0xB5, 0x4F, 0x99, 0x8F, 0x5E,
-  0x8B, 0xF5, 0x3B, 0xB2, 0xDC, 0x48, 0x2E, 0xB8
-}; // appKey (128-bit)
+// uint8_t appKey[16] = {
+//   /* your appKEY */  
+// }; // AppKey (AES-128)
 
-const uint8_t hmacKey[16] = {
-  0x06, 0x83, 0x24, 0x3D, 0xD8, 0xEB, 0x4E, 0x5C,
-  0x4B, 0xB7, 0x8A, 0x03, 0xE2, 0xD0, 0x7E, 0x86
-}; // hmacKey (128-bit)
+// const uint8_t hmacKey[16] = {
+//    /* yourHMAC key */
+// }; // Shared HMAC key (16 bytes)
 
 
 
