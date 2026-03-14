@@ -219,97 +219,50 @@ void storePacket(const uint8_t* data, size_t length, DataType dataType, const ch
 // - Final format handled by `encryptAndPackage()`
 
 // Helper to load, encrypt, and send a file by full path
-bool sendGroupFileAtPath(const char* path, bool finalSend = true) {
+bool sendGroupFileAtPath(const char* path) {
   File file = SPIFFS.open(path, FILE_READ);
   if (!file) {
     Serial.printf("[ERROR] Failed to open file: %s\n", path);
     return false;
   }
 
-  std::vector<uint8_t> packetData;
+  size_t fileSize = file.size();
+  if (fileSize == 0) {
+    Serial.printf("[WARN] Empty file: %s\n", path);
+    file.close();
+    return false;
+  }
 
-  while (file.available() >= 3) {
-  uint16_t entryLen;
-  if (file.readBytes((char*)&entryLen, 2) != 2) break;
-
-  if (entryLen < 1) break;  // Invalid length
-
-  std::vector<uint8_t> entry(entryLen);
-  if (file.read(entry.data(), entryLen) != entryLen) break;
-
-  // Append full original record: [1-byte type][N-byte payload]
-  packetData.insert(packetData.end(), entry.begin(), entry.end());
-}
-
-
+  // Load entire file into RAM
+  std::vector<uint8_t> buffer(fileSize);
+  file.read(buffer.data(), fileSize);
   file.close();
 
-  if (packetData.empty()) {
-    Serial.printf("[ERROR] No valid entries found in %s\n", path);
-    return false;
-  }
+  // Send using your polymorphic streamer
+  PolymorphicLoraSender sender;
+  sender.sendStream(buffer.data(), fileSize, TYPE_STREAM);
 
-  SessionInfo session;
-  SessionStatus status = verifySession(devEUIHex, session);
-  if (status != SESSION_OK) {
-    Serial.println("[ERROR] No valid session.");
-    return false;
-  }
+  Serial.printf("[OK] Streamed group file: %s (%zu bytes)\n", path, fileSize);
 
-  size_t finalLen = 0;
-  uint8_t* finalPacket = encryptAndPackage(packetData.data(), packetData.size(), session, finalLen, devEUI);
-
-  transmissonFlag = true;
-  lora->standby();
-  delay(5);
-  int result = lora->transmit(finalPacket, finalLen);
-  delay(10);
-
-  if (finalSend) {
-    lora->startReceive();
-  }
-
-  transmissonFlag = false;
-
-  if (result == RADIOLIB_ERR_NONE) {
-    Serial.println("[ACK] Sent successfully.");
-  } else {
-    Serial.println("[ACK] Failed to send ACK.");
-  }
-
-  delete[] finalPacket;
-  delay(500);
+  delay(300); // small gap between files
   return true;
 }
 
 
 void sendStoredGroupFile(const char* pathBase) {
-  for (int suffix = 0; suffix < 9; suffix++) {
-    char path1[32];
-    snprintf(path1, sizeof(path1), "/%s_%d.bin", pathBase, suffix);
+  for (int suffix = 0; suffix < groupConfig.groupPrefixLimit; suffix++) {
 
-    if (!SPIFFS.exists(path1)) {
+    char path[32];
+    snprintf(path, sizeof(path), "/%s_%d.bin", pathBase, suffix);
+
+    if (!SPIFFS.exists(path)) {
       continue;
     }
 
-    // Check if there's a second file before we send anything
-    char path2[32];
-    snprintf(path2, sizeof(path2), "/%s_%d.bin", pathBase, suffix + 1);
-    bool hasSecond = SPIFFS.exists(path2);
-
-    // Send first file (tell it not to restart RX if there's a second one)
-    if (sendGroupFileAtPath(path1, !hasSecond)) {
-      Serial.printf("[INFO] Sent first file: %s\n", path1);
-    }
-
-    delay(500);
-     
-    if (hasSecond) {
-      sendGroupFileAtPath(path2, true);  // Restart RX after second send
-      Serial.printf("[INFO] Sent second file: %s\n", path2);
-    }
-    break;  // Only send one or two files total
+    sendGroupFileAtPath(path);
   }
+
+  Serial.println("[DONE] All group files streamed.");
 }
 
 void sender(const uint8_t* finalPacket, size_t finalLen) {
