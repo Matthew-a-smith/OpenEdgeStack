@@ -25,26 +25,25 @@ A future extension is planned to add an MQTT-based console for viewing data when
 
 ---
 ## Change log (Version 1.1.2)
-    Mar 13 2026
+Mar 13 2026
 
  - Fixed join request reliability to improve OTAA encryption stability.
 
-- Added a new polymorphic LoRa send feature for large payload transmission.
+ - Added a new polymorphic LoRa send feature for large payload transmission.
+   - Introduced PolymorphicLoraSender C++ class using virtual dispatch.
+   - Supports sending data sets larger than the LoRa payload limit.
+   - Automatically splits outgoing data into 200-byte chunks.
+   - Each chunk is encrypted and transmitted using the existing session system.
+   - The same runtime instance is reused to stream all chunks sequentially.
+   - Final chunk includes a stream end identifier byte for receiver-side reassembly.
+   - Designed for continuous transmission without ACK handling.
 
-  • Introduced PolymorphicLoraSender C++ class using virtual dispatch.
-  • Supports sending data sets larger than the LoRa payload limit.
-  • Automatically splits outgoing data into 200-byte chunks.
-  • Each chunk is encrypted and transmitted using the existing session system.
-  • The same runtime instance is reused to stream all chunks sequentially.
-  • Final chunk includes a stream end identifier byte for receiver-side reassembly.
-  • Designed for continuous transmission without ACK handling.
+  - Platform & Development
 
-  Platform & Development
-
-  • Created a platformio.ini for streamlined build and deployment.
-  • Removed all unused libraries outside of the LoRa/radio library to reduce compile time.
-  • Enables faster development with VS Code + PlatformIO extension.
-  • When running examples on boards, update main.cpp to the correct include path for the example.
+    - Created a platformio.ini for streamlined build and deployment.
+    - Removed all unused libraries outside of the LoRa/radio library to reduce compile time.
+    - Enables faster development with VS Code + PlatformIO extension.
+    - When running examples on boards, update main.cpp to the correct include path for the example.
 
   Example performance:
     ~1000 bytes typically transmits in ~5–10 seconds depending on link conditions.
